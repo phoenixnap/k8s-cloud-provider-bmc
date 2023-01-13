@@ -1,0 +1,10 @@
+apiVersion: v2
+name: cloud-provider-phoenixnap
+description: Kubernetes Cloud Provider for PhoenixNAP
+type: application
+version: "0.1.0"
+appVersion: "main"
+home: https://phoenixnap.com
+sources:
+  - https://github.com/phoenixnap/cloud-provider-pnap
+
