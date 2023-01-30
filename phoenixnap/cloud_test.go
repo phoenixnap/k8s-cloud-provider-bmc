@@ -12,6 +12,7 @@ import (
 	"github.com/phoenixnap/go-sdk-bmc/billingapi"
 	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
+	"github.com/phoenixnap/go-sdk-bmc/tagapi"
 
 	clientset "k8s.io/client-go/kubernetes"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
@@ -70,7 +71,7 @@ func testGetValidCloud(t *testing.T, LoadBalancerSetting string) (*cloud, *store
 	url, _ := url.Parse(ts.URL)
 	urlString := url.String()
 
-	bmc, _, ip, err := constructClients(token, urlString)
+	bmc, _, ip, tag, err := constructClients(token, urlString)
 	if err != nil {
 		t.Fatalf("unable to construct testing phoenixnap API client: %v", err)
 	}
@@ -79,7 +80,7 @@ func testGetValidCloud(t *testing.T, LoadBalancerSetting string) (*cloud, *store
 	config := Config{
 		LoadBalancerSetting: LoadBalancerSetting,
 	}
-	c, _ := newCloud(config, bmc, ip)
+	c, _ := newCloud(config, bmc, ip, tag)
 	ccb := &mockControllerClientBuilder{}
 	c.Initialize(ccb, nil)
 
@@ -180,7 +181,7 @@ func TestHasClusterID(t *testing.T) {
 }
 
 // builds a phoenixnap client
-func constructClients(authToken, baseURL string) (bmc *bmcapi.APIClient, billing *billingapi.APIClient, ip *ipapi.APIClient, err error) {
+func constructClients(authToken, baseURL string) (bmc *bmcapi.APIClient, billing *billingapi.APIClient, ip *ipapi.APIClient, tag *tagapi.APIClient, err error) {
 	// set up our client and create the cloud interface
 
 	var u *url.URL
@@ -218,6 +219,14 @@ func constructClients(authToken, baseURL string) (bmc *bmcapi.APIClient, billing
 	ipConfiguration.Host = u.Host
 	ipConfiguration.Scheme = u.Scheme
 	ip = ipapi.NewAPIClient(ipConfiguration)
+
+	tagConfiguration := tagapi.NewConfiguration()
+	tagConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
+
+	// these are for changing the server target
+	tagConfiguration.Host = u.Host
+	tagConfiguration.Scheme = u.Scheme
+	tag = tagapi.NewAPIClient(tagConfiguration)
 
 	return
 

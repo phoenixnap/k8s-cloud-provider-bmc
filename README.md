@@ -135,7 +135,7 @@ This section lists each configuration option, and whether it can be set by each 
 | Path to config secret |    |    | `cloud-config` | error |
 | Client ID |    | `PNAP_CLIENT_ID` | `clientID` | error |
 | Client Secret |    | `PNAP_CLIENT_SECRET` | `clientSecret` | error |
-| Location in which to create LoadBalancer Floating IPs |    | `PNAP_LOCATION` | `location` | Service-specific annotation, else error |
+| Location in which to create LoadBalancer IP Blocks |    | `PNAP_LOCATION` | `location` | Service-specific annotation, else error |
 | Base URL to PhoenixNAP API |    |    | `base-url` | Official PhoenixNAP API |
 | Load balancer setting |   | `PNAP_LOAD_BALANCER` | `loadbalancer` | none |
 | Kubernetes Service annotation to set IP block location |   | `PNAP_ANNOTATION_IP_LOCATION` | `annotationIPLocation` | `"phoenixnap.com/ip-location"` |
@@ -163,27 +163,25 @@ For a Service of `type=LoadBalancer` CCM will create one using the PhoenixNAP AP
 so load balancers can consume them.
 
 PhoenixNAP's API does not support adding tags to individual IP addresses, while it has full support for tags on blocks.
-PhoenixNAP CCM uses tags to mark IP blocks and individual IPs as assigned to specific services.
+Each block created is of type `/31`. The first IP is for the network, the second is used for the service.
+PhoenixNAP CCM uses tags to mark IP blocks as assigned to specific services.
 
-Each block is given at least 2 tags:
+Each block is given 3 tags:
 
 * `usage=cloud-provider-phoenixnap-auto` - identifies that the IP block was reserved automatically using the phoenixnap CCM
 * `cluster=<clusterID>` - identifies the cluster to which the IP block belongs
+* `service=<serviceID>` - which service this IP block is assigned to
 
-In addition, with each IP address in the block, the following tags are added:
-
-* `service-ip-<serviceID>=<ip>` - identifies the IP address assigned to the service
-
-Note that the `<serviceID>` is hashed using sha256 and then base64-encoded, to prevent being able to identify the service from the tag.
+Note that the `<serviceID>` includes both the namespace and the name, e.g. `namespace5/nginx`. While all valid characters
+for a namespace and a service name are valid for a tag value, the `/` character is not. Therefore, the CCM replaces
+`/` with `.` in the service ID.
 
 When CCM encounters a `Service` of `type=LoadBalancer`, it will use the PhoenixNAP API to:
 
-1. Look for a block of public IP addresses with fewer `service-ip-*` tags than IPs in the block. Else:
-2. Request a new, location-specific IP block and tag it appropriately.
-3. Select one IP from the block to assign to the Service.
-3. Add a tag to the IP block assigning that IP to the specific service using `service-ip-<serviceID>`.
-
-Finally, it will set the selected to `Service.Spec.LoadBalancerIP`.
+1. Look for a block of public IP addresses with the cluster and constant PhoenixNAP tags, as well as the tag `service=<serviceID>`. Else:
+2. Request a new, location-specific `/31` IP block and tag it appropriately.
+3. Use the last IP in the block for the service.
+4. Set the IP to `Service.Spec.LoadBalancerIP`.
 
 #### Service Load Balancer IP Location
  
@@ -239,12 +237,10 @@ If `pnap-l2` management is enabled, then CCM does the following.
 1. For each service of `type=LoadBalancer` currently in the cluster or added:
    * if an IP block with the appropriate tags exists, and the `Service` already has that IP address affiliated with it, it is ready; ignore
    * if an IP block with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core)
-   * if an IP block with the appropriate tags does not exist, but an IP block with unused IPs exists, allocate an IP and add it to the services spec
-   * if an IP block with the appropriate tags does not exist, and no IP block with unused IPs exists, create a new IP block, allocate an IP and add it to the services spec 
+   * if an IP block with the appropriate tags does not exist, create a new IP block, allocate an IP and add it to the services spec 
 1. For each service of `type=LoadBalancer` deleted from the cluster:
    * find the IP address from the service spec and remove it
-   * remove the Service-specific tag from the IP block
-   * if no other services are using the IP block, delete the IP block
+   * find the block with the appropriate tags and delete it
 
 ## Core Control Loop
 
@@ -261,7 +257,7 @@ If a loadbalancer is enabled, CCM creates a PhoenixNAP IP block and reserves an 
 `type=LoadBalancer`. It tags the Reservation with the following tags:
 
 * `usage="cloud-provider-pnap-auto"`
-* `service="<service-hash>"` where `<service-hash>` is the sha256 hash of `<namespace>/<service-name>`. We do this so that the name of the service does not leak out to PhoenixNAP itself.
+* `service="<serviceID>"` where `<serviceID>` is `<namespace>.<service-name>`.
 * `cluster=<clusterID>` where `<clusterID>` is the UID of the immutable `kube-system` namespace. We do this so that if someone runs two clusters in the same account, and there is one `Service` in each cluster with the same namespace and name, then the two IPs will not conflict.
 
 ## Running Locally

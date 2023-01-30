@@ -2,18 +2,15 @@ package phoenixnap
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
-	"net"
+	"net/netip"
 	"net/url"
-	"strconv"
 	"strings"
 
-	"github.com/apparentlymart/go-cidr/cidr"
 	"github.com/phoenixnap/cloud-provider-pnap/phoenixnap/loadbalancers"
 	pnapl2 "github.com/phoenixnap/cloud-provider-pnap/phoenixnap/loadbalancers/pnap-l2"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
+	"github.com/phoenixnap/go-sdk-bmc/tagapi"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,12 +19,9 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const (
-	serviceTagPrefix = "service-ip-"
-)
-
 type loadBalancers struct {
-	client               *ipapi.APIClient
+	ipClient             *ipapi.APIClient
+	tagClient            *tagapi.APIClient
 	k8sclient            kubernetes.Interface
 	location             string
 	clusterID            string
@@ -37,13 +31,13 @@ type loadBalancers struct {
 	nodeSelector         labels.Selector
 }
 
-func newLoadBalancers(client *ipapi.APIClient, k8sclient kubernetes.Interface, location, config string, ipLocationAnnotation, nodeSelector string) (*loadBalancers, error) {
+func newLoadBalancers(ipClient *ipapi.APIClient, tagClient *tagapi.APIClient, k8sclient kubernetes.Interface, location, config string, ipLocationAnnotation, nodeSelector string) (*loadBalancers, error) {
 	selector := labels.Everything()
 	if nodeSelector != "" {
 		selector, _ = labels.Parse(nodeSelector)
 	}
 
-	l := &loadBalancers{client, k8sclient, location, "", nil, config, ipLocationAnnotation, selector}
+	l := &loadBalancers{ipClient, tagClient, k8sclient, location, "", nil, config, ipLocationAnnotation, selector}
 
 	// parse the implementor config and see what kind it is - allow for no config
 	if l.implementorConfig == "" {
@@ -89,52 +83,46 @@ func newLoadBalancers(client *ipapi.APIClient, k8sclient kubernetes.Interface, l
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadBalancers) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (status *v1.LoadBalancerStatus, exists bool, err error) {
 	svcName := serviceRep(service)
-	svcTag := serviceTag(service)
-	clsTag, clsValue := clusterTag(l.clusterID)
-	svcIP := service.Spec.LoadBalancerIP
 
-	// tags for Get() are separated via '.', so '<key>.<value>'
-	tags := []string{svcTag, fmt.Sprintf("%s.%s", clsTag, clsValue), fmt.Sprintf("%s.%s", pnapTag, pnapValue)}
-	// get IP address blocks and check if any exist for this svc
-	blocks, _, err := l.client.IPBlocksApi.IpBlocksGet(context.Background()).Tag(tags).Execute()
-
-	if err != nil {
-		return nil, false, fmt.Errorf("unable to retrieve IP reservations: %w", err)
+	// if no service IP, then there is no load balancer for it
+	if service.Spec.LoadBalancerIP == "" {
+		return nil, false, nil
 	}
-	klog.V(2).Infof("got ip blocks %d", len(blocks))
+	svcIP, err := netip.ParseAddr(service.Spec.LoadBalancerIP)
+	if err != nil {
+		return nil, false, fmt.Errorf("invalid service IP %s: %w", service.Spec.LoadBalancerIP, err)
+	}
+
+	blocks, err := l.getIPBlocks(service.Namespace, service.Name)
+	if err != nil {
+		return nil, false, err
+	}
 
 	if len(blocks) == 0 {
 		klog.V(2).Infof("no blocks with reservation found")
 		return nil, false, nil
 	}
-
 	if len(blocks) > 1 {
-		klog.V(2).Infof("too many blocks found for same service %d for %s", len(blocks), svcName)
-		return nil, false, fmt.Errorf("too many blocks found for same service %s", svcName)
+		klog.V(2).Infof("multiple blocks with reservation found")
+		return nil, false, fmt.Errorf("more than one block found for service %s", svcName)
 	}
-	var targetIP string
-	for _, tag := range blocks[0].Tags {
-		if tag.Name != svcTag {
-			continue
-		}
-		if tag.Value == nil {
-			return nil, false, fmt.Errorf("tag %s has no value", svcTag)
-		}
-		targetIP = *tag.Value
-		break
+
+	// one block, it has our IP
+	block := blocks[0]
+	network, err := netip.ParsePrefix(block.Cidr)
+	if err != nil {
+		klog.V(2).Infof("invalid CIDR %s: %s", block.Cidr, err)
+		return nil, false, fmt.Errorf("invalid CIDR in block %s: %w", block.Cidr, err)
+	}
+	if !network.Contains(svcIP) {
+		klog.V(2).Infof("block %s does not contain IP %s", block.Cidr, svcIP)
+		return nil, false, fmt.Errorf("block %s does not contain IP %s", block.Cidr, svcIP)
 	}
 
 	klog.V(2).Infof("GetLoadBalancer(): %s with existing IP assignment %s", svcName, svcIP)
-
-	// get the IPs and see if there is anything to clean up
-	if targetIP == "" {
-		klog.V(2).Infof("no reservation found")
-		return nil, false, nil
-	}
-	klog.V(2).Infof("reservation found: %s", targetIP)
 	return &v1.LoadBalancerStatus{
 		Ingress: []v1.LoadBalancerIngress{
-			{IP: targetIP},
+			{IP: svcIP.String()},
 		},
 	}, true, nil
 }
@@ -142,9 +130,8 @@ func (l *loadBalancers) GetLoadBalancer(ctx context.Context, clusterName string,
 // GetLoadBalancerName returns the name of the load balancer. Implementations must treat the
 // *v1.Service parameter as read-only and not modify it.
 func (l *loadBalancers) GetLoadBalancerName(ctx context.Context, clusterName string, service *v1.Service) string {
-	svcTag := serviceTag(service)
 	clsTag, clsValue := clusterTag(l.clusterID)
-	return fmt.Sprintf("%s=%s:%s=%s:%s=%s", pnapTag, pnapValue, svcTag, service.Spec.LoadBalancerIP, clsTag, clsValue)
+	return fmt.Sprintf("%s=%s:%s=%s:%s=%s", pnapTag, pnapValue, "service", serviceRep(service), clsTag, clsValue)
 }
 
 // EnsureLoadBalancer creates a new load balancer 'name', or updates the existing one. Returns the status of the balancer
@@ -161,88 +148,54 @@ func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	if exists {
 		return status, nil
 	}
-	// no error, but no existing load balancer, so create one
 
-	// get IP blocks, see if any have spare IPs
-	// tags for Get() are separated via '.', so '<key>.<value>'
-	clsTag, clsValue := clusterTag(l.clusterID)
-	tags := []string{fmt.Sprintf("%s.%s", clsTag, clsValue), fmt.Sprintf("%s.%s", pnapTag, pnapValue)}
-	// get IP address blocks and check if any exist for this svc
-	blocks, _, err := l.client.IPBlocksApi.IpBlocksGet(context.Background()).Tag(tags).Execute()
+	// no error, but no existing load balancer, so create one
+	svcName := serviceRep(service)
+	blocks, err := l.getIPBlocks(service.Namespace, service.Name)
 	if err != nil {
 		return nil, err
 	}
-	var (
-		foundBlock *ipapi.IpBlock
-		foundIP    string
-	)
-	for _, block := range blocks {
-		sizeAsInt, err := strconv.ParseInt(block.CidrBlockSize[1:], 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid cidr size: %s %v", block.CidrBlockSize, err)
-		}
-		size := 32 - sizeAsInt
-		used := map[string]bool{}
-		for _, tag := range block.Tags {
-			if strings.HasPrefix(tag.Name, serviceTagPrefix) {
-				addr := strings.TrimPrefix(tag.Name, serviceTagPrefix)
-				used[addr] = true
-			}
-		}
-		if len(used) >= int(size) {
-			continue
-		}
-		foundBlock = &block
-		// figure out which IPs were not used and pick one
-		ip := strings.SplitN(block.Cidr, "/", 2)
-		if len(ip) != 2 {
-			return nil, fmt.Errorf("invalid cidr: %s", block.Cidr)
-		}
-		start, finish := cidr.AddressRange(&net.IPNet{
-			IP:   net.ParseIP(ip[0]),
-			Mask: net.CIDRMask(int(sizeAsInt), 32),
-		})
-		// ignore the first address
-		for i := cidr.Inc(start); !i.Equal(finish); i = cidr.Inc(i) {
-			addr := i.String()
-			if used[addr] {
-				continue
-			}
-			foundIP = addr
-			break
-		}
-		break
-	}
 
-	// if no block found with space, allocate a new block
-	if foundBlock == nil {
+	var (
+		foundIP string
+	)
+	if len(blocks) > 1 {
+		klog.V(2).Infof("multiple blocks with reservation found")
+		return nil, fmt.Errorf("more than one block found for service %s", svcName)
+	}
+	var block *ipapi.IpBlock
+	if len(blocks) == 1 {
+		// we have a block, but it doesn't have an IP assigned
+		block = &blocks[0]
+	} else {
+		clsTag, clsValue := clusterTag(l.clusterID)
 		ipBlockCreate := ipapi.NewIpBlockCreate(l.location, fmt.Sprintf("/%d", serviceBlockCidr))
 		// copy because we cannot take pointer to constant to use here
-		val := pnapValue
+		pnapVal := pnapValue
 		tags := []ipapi.TagAssignmentRequest{
-			{Name: pnapTag, Value: &val},
+			{Name: pnapTag, Value: &pnapVal},
 			{Name: clsTag, Value: &clsValue},
+			{Name: serviceNamespaceTag, Value: &service.Namespace},
+			{Name: serviceNameTag, Value: &service.Name},
+		}
+		if err := ensureTags(l.tagClient, pnapTag, clsTag, serviceNamespaceTag, serviceNameTag); err != nil {
+			return nil, fmt.Errorf("unable to ensure tags exist: %w", err)
 		}
 		ipBlockCreate.Tags = append(ipBlockCreate.Tags, tags...)
 
-		block, _, err := l.client.IPBlocksApi.IpBlocksPost(context.Background()).IpBlockCreate(*ipBlockCreate).Execute()
+		block, _, err = l.ipClient.IPBlocksApi.IpBlocksPost(context.Background()).IpBlockCreate(*ipBlockCreate).Execute()
 		if err != nil {
 			return nil, fmt.Errorf("unable to create new IP block: %w", err)
 		}
-		foundBlock = block
 	}
-	newTag := serviceTag(service)
+	network, err := netip.ParsePrefix(block.Cidr)
+	if err != nil {
+		klog.V(2).Infof("invalid CIDR %s: %s", block.Cidr, err)
+		return nil, fmt.Errorf("invalid CIDR in block %s: %w", block.Cidr, err)
+	}
+	foundIP = network.Addr().Next().String()
+	// assign the second IP in the block to this service
 
-	// TODO: need to assign all tags from foundBlock.Tags plus new one, not just new ones.
-	requests := tagAssignmentsIntoRequests(foundBlock.Tags)
-	requests = append(requests, ipapi.TagAssignmentRequest{
-		Name:  newTag,
-		Value: &foundIP,
-	})
-	// concatenate tag
-	if _, _, err := l.client.IPBlocksApi.IpBlocksIpBlockIdTagsPut(context.Background(), foundBlock.Id).TagAssignmentRequest(requests).Execute(); err != nil {
-		return nil, fmt.Errorf("unable to update tags reservations: %w", err)
-	}
 	ipCidr, err := l.addService(ctx, service, foundIP, filterNodes(nodes, l.nodeSelector))
 	if err != nil {
 		return nil, fmt.Errorf("failed to add service %s: %w", service.Name, err)
@@ -292,14 +245,11 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	// REMOVAL
 	klog.V(2).Infof("EnsureLoadBalancerDeleted(): remove: %s", service.Name)
 	svcName := serviceRep(service)
-	svcTag := serviceTag(service)
-	clsTag, clsValue := clusterTag(l.clusterID)
 	svcIP := service.Spec.LoadBalancerIP
 
 	// tags for Get() are separated via '.', so '<key>.<value>'
-	tags := []string{fmt.Sprintf("%s.%s", svcTag, svcIP), fmt.Sprintf("%s.%s", clsTag, clsValue), fmt.Sprintf("%s.%s", pnapTag, pnapValue)}
 	// get IP address blocks and check if any exist for this svc
-	blocks, _, err := l.client.IPBlocksApi.IpBlocksGet(context.Background()).Tag(tags).Execute()
+	blocks, err := l.getIPBlocks(service.Namespace, service.Name)
 	if err != nil {
 		return fmt.Errorf("unable to retrieve IP reservations: %w", err)
 	}
@@ -312,20 +262,8 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	if len(blocks) > 1 {
 		return fmt.Errorf("multiple IP blocks found for %s, cannot delete", svcName)
 	}
-	// TODO: update tags to remove our tag
-	var targetTags []ipapi.TagAssignment
-	for _, tag := range blocks[0].Tags {
-		if tag.Name == svcTag {
-			continue
-		}
-		targetTags = append(targetTags, tag)
-	}
 
-	// REMOVE
-	//removedTag := RemoveTagFromIpBlock(*addedTag, 0)
-
-	requests := tagAssignmentsIntoRequests(targetTags)
-	if _, _, err := l.client.IPBlocksApi.IpBlocksIpBlockIdTagsPut(context.Background(), blocks[0].Id).TagAssignmentRequest(requests).Execute(); err != nil {
+	if _, _, err := l.ipClient.IPBlocksApi.IpBlocksIpBlockIdDelete(context.Background(), blocks[0].Id).Execute(); err != nil {
 		return fmt.Errorf("unable to update tags reservations: %w", err)
 	}
 
@@ -334,6 +272,18 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 }
 
 // utility funcs
+
+// getIPBlocks returns cluster-related IP blocks
+func (l *loadBalancers) getIPBlocks(namespace, name string) (blocks []ipapi.IpBlock, err error) {
+	clsTag, clsValue := clusterTag(l.clusterID)
+
+	// tags for Get() are separated via '.', so '<key>.<value>'
+	tags := []string{fmt.Sprintf("%s.%s", serviceNamespaceTag, namespace), fmt.Sprintf("%s.%s", serviceNameTag, name), fmt.Sprintf("%s.%s", clsTag, clsValue), fmt.Sprintf("%s.%s", pnapTag, pnapValue)}
+	// get IP address blocks and check if any has an IP that matches this service
+	blocks, _, err = l.ipClient.IPBlocksApi.IpBlocksGet(context.Background()).Tag(tags).Execute()
+
+	return
+}
 
 // addService add a single service; wraps the implementation
 func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ip string, nodes []*v1.Node) (string, error) {
@@ -387,24 +337,6 @@ func serviceRep(svc *v1.Service) string {
 		return ""
 	}
 	return fmt.Sprintf("%s/%s", svc.Namespace, svc.Name)
-}
-
-func serviceAnnotation(svc *v1.Service, annotation string) string {
-	if svc == nil {
-		return ""
-	}
-	if svc.ObjectMeta.Annotations == nil {
-		return ""
-	}
-	return svc.ObjectMeta.Annotations[annotation]
-}
-
-func serviceTag(svc *v1.Service) string {
-	if svc == nil {
-		return ""
-	}
-	hash := sha256.Sum256([]byte(serviceRep(svc)))
-	return fmt.Sprintf("%s%s", serviceTagPrefix, base64.StdEncoding.EncodeToString(hash[:]))
 }
 
 func clusterTag(clusterID string) (string, string) {

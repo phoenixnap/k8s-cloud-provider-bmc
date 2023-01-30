@@ -7,6 +7,7 @@ import (
 
 	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
+	"github.com/phoenixnap/go-sdk-bmc/tagapi"
 	"golang.org/x/oauth2/clientcredentials"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/component-base/version"
@@ -27,6 +28,7 @@ const (
 type cloud struct {
 	bmcClient    *bmcapi.APIClient
 	ipClient     *ipapi.APIClient
+	tagClient    *tagapi.APIClient
 	config       Config
 	instances    *instances
 	loadBalancer *loadBalancers
@@ -34,10 +36,11 @@ type cloud struct {
 
 var _ cloudprovider.Interface = (*cloud)(nil)
 
-func newCloud(pnapConfig Config, bmcClient *bmcapi.APIClient, ipClient *ipapi.APIClient) (cloudprovider.Interface, error) {
+func newCloud(pnapConfig Config, bmcClient *bmcapi.APIClient, ipClient *ipapi.APIClient, tagClient *tagapi.APIClient) (cloudprovider.Interface, error) {
 	return &cloud{
 		bmcClient: bmcClient,
 		ipClient:  ipClient,
+		tagClient: tagClient,
 		config:    pnapConfig,
 	}, nil
 }
@@ -66,7 +69,6 @@ func init() {
 		bmcConfiguration := bmcapi.NewConfiguration()
 		bmcConfiguration.HTTPClient = ccConfig.Client(context.Background())
 		bmcConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
-
 		bmcClient := bmcapi.NewAPIClient(bmcConfiguration)
 
 		ipConfiguration := ipapi.NewConfiguration()
@@ -74,7 +76,12 @@ func init() {
 		ipConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
 		ipClient := ipapi.NewAPIClient(ipConfiguration)
 
-		cloud, err := newCloud(pnapConfig, bmcClient, ipClient)
+		tagConfiguration := tagapi.NewConfiguration()
+		tagConfiguration.HTTPClient = ccConfig.Client(context.Background())
+		tagConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
+		tagClient := tagapi.NewAPIClient(tagConfiguration)
+
+		cloud, err := newCloud(pnapConfig, bmcClient, ipClient, tagClient)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new cloud handler: %w", err)
 		}
@@ -91,7 +98,7 @@ func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, 
 	clientset := clientBuilder.ClientOrDie("cloud-provider-phoenixnap-shared-informers")
 
 	// initialize the individual services
-	lb, err := newLoadBalancers(c.ipClient, clientset, c.config.Location, c.config.LoadBalancerSetting, c.config.AnnotationIPLocation, c.config.ServiceNodeSelector)
+	lb, err := newLoadBalancers(c.ipClient, c.tagClient, clientset, c.config.Location, c.config.LoadBalancerSetting, c.config.AnnotationIPLocation, c.config.ServiceNodeSelector)
 	if err != nil {
 		klog.Fatalf("could not initialize LoadBalancers: %v", err)
 	}
