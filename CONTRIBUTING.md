@@ -24,7 +24,7 @@ All public functions and variables should include at least a short description
 of the functionality they provide. Comments should be formatted according to
 <https://golang.org/doc/effective_go.html#commentary>.
 
-Documentation at <https://pkg.go.dev/github.com/phoenixnap/cloud-provider-pnap> will be
+Documentation at <https://pkg.go.dev/github.com/phoenixnap/k8s-cloud-provider-bmc> will be
 generated from these comments.
 
 Although the PhoenixNAP CCM is intended more as a standalone runtime container than

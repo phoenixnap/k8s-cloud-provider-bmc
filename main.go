@@ -18,7 +18,7 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 	"k8s.io/klog/v2"
 
-	"github.com/phoenixnap/cloud-provider-pnap/phoenixnap"
+	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap"
 	"github.com/spf13/pflag"
 )
 

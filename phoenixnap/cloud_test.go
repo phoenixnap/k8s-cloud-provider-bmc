@@ -7,12 +7,12 @@ import (
 	"net/url"
 	"testing"
 
-	pnapServer "github.com/phoenixnap/cloud-provider-pnap/phoenixnap/server"
-	"github.com/phoenixnap/cloud-provider-pnap/phoenixnap/server/store"
 	"github.com/phoenixnap/go-sdk-bmc/billingapi"
 	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
 	"github.com/phoenixnap/go-sdk-bmc/tagapi"
+	pnapServer "github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server"
+	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server/store"
 
 	clientset "k8s.io/client-go/kubernetes"
 	k8sfake "k8s.io/client-go/kubernetes/fake"

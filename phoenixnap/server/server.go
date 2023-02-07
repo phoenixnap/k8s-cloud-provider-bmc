@@ -5,9 +5,9 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/phoenixnap/cloud-provider-pnap/phoenixnap/server/store"
 	"github.com/phoenixnap/go-sdk-bmc/billingapi"
 	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
+	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server/store"
 )
 
 // ErrorHandler a handler for errors that can choose to exit or not

@@ -14,4 +14,4 @@ be reflected in Github or issue comments.
 For other forms of support, visit
 <https://www.phoenixnap.com/>.
 
-[open a GitHub Issue]: https://github.com/phoenixnap/cloud-provider-pnap/issues/new
+[open a GitHub Issue]: https://github.com/phoenixnap/k8s-cloud-provider-bmc/issues/new

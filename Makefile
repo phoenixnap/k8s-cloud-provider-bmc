@@ -2,7 +2,7 @@ SHELL=/bin/sh
 BINARY ?= cloud-provider-phoenixnap
 BUILD_IMAGE?=phoenixnap/cloud-provider-phoenixnap
 BUILDER_IMAGE?=golang:1.17-alpine3.15
-PACKAGE_NAME?=github.com/phoenixnap/cloud-provider-pnap
+PACKAGE_NAME?=github.com/phoenixnap/k8s-cloud-provider-bmc
 GIT_VERSION?=$(shell git log -1 --format="%h")
 VERSION?=$(GIT_VERSION)
 RELEASE_TAG ?= $(shell git tag --points-at HEAD)

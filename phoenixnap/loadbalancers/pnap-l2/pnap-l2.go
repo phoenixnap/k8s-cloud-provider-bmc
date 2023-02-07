@@ -4,7 +4,7 @@ package empty
 import (
 	"context"
 
-	"github.com/phoenixnap/cloud-provider-pnap/phoenixnap/loadbalancers"
+	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/loadbalancers"
 	"k8s.io/client-go/kubernetes"
 )
 

@@ -1,4 +1,4 @@
-module github.com/phoenixnap/cloud-provider-pnap
+module github.com/phoenixnap/k8s-cloud-provider-bmc
 
 go 1.19
 

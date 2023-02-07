@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 	randomdata "github.com/pallinder/go-randomdata"
-	"github.com/phoenixnap/cloud-provider-pnap/phoenixnap/server/store"
 	"github.com/phoenixnap/go-sdk-bmc/billingapi"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
+	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server/store"
 )
 
 var randomID = uuid.New().String()

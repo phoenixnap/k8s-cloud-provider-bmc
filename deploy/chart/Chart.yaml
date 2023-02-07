@@ -6,5 +6,5 @@ version: "0.1.0"
 appVersion: "main"
 home: https://phoenixnap.com
 sources:
-  - https://github.com/phoenixnap/cloud-provider-pnap
+  - https://github.com/phoenixnap/k8s-cloud-provider-bmc
 

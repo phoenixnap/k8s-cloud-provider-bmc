@@ -1,13 +1,13 @@
 # Kubernetes Cloud Controller Manager for PhoenixNAP
 
-[![GitHub release](https://img.shields.io/github/release/phoenixnap/cloud-provider-pnap/all.svg?style=flat-square)](https://github.com/phoenixnap/cloud-provider-pnap/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/phoenixnap/cloud-provider-pnap)](https://goreportcard.com/report/github.com/phoenixnap/cloud-provider-pnap)
-![Continuous Integration](https://github.com/phoenixnap/cloud-provider-pnap/workflows/Continuous%20Integration/badge.svg)
-[![Docker Pulls](https://img.shields.io/docker/pulls/phoenixnap/cloud-provider-pnap.svg)](https://hub.docker.com/r/phoenixnap/cloud-provider-pnap/)
+[![GitHub release](https://img.shields.io/github/release/phoenixnap/k8s-cloud-provider-bmc/all.svg?style=flat-square)](https://github.com/phoenixnap/k8s-cloud-provider-bmc/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/phoenixnap/k8s-cloud-provider-bmc)](https://goreportcard.com/report/github.com/phoenixnap/k8s-cloud-provider-bmc)
+![Continuous Integration](https://github.com/phoenixnap/k8s-cloud-provider-bmc/workflows/Continuous%20Integration/badge.svg)
+[![Docker Pulls](https://img.shields.io/docker/pulls/phoenixnap/k8s-cloud-provider-bmc.svg)](https://hub.docker.com/r/phoenixnap/k8s-cloud-provider-bmc/)
 ![PhoenixNAP Maintained](https://img.shields.io/badge/stability-maintained-green.svg)
 
 
-`cloud-provider-pnap` is the Kubernetes CCM implementation for PhoenixNAP. Read more about the CCM in [the official Kubernetes documentation](https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/).
+`k8s-cloud-provider-bmc` is the Kubernetes CCM implementation for PhoenixNAP. Read more about the CCM in [the official Kubernetes documentation](https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/).
 
 This repository is **Maintained**!
 
@@ -54,7 +54,7 @@ It is important that the Kubernetes node name matches the device name.
 
 ### Get PhoenixNAP client ID and client secret
 
-To run `cloud-provider-pnap`, you need your PhoenixNAP client ID and client secret that your cluster is running in.
+To run `k8s-cloud-provider-bmc`, you need your PhoenixNAP client ID and client secret that your cluster is running in.
 You can generate them from the [PhoenixNAP portal](https://bmc.phoenixnap.com/credentials).
 Ensure it at least has the scopes of `"bmc"`, `"bmc.read"`, `"tags"` and `"tags.read"`.
 
@@ -105,7 +105,7 @@ To apply the CCM itself, select your release and apply the manifest:
 
 ```
 RELEASE=v2.0.0
-kubectl apply -f https://github.com/phoenixnap/cloud-provider-pnap/releases/download/${RELEASE}/deployment.yaml
+kubectl apply -f https://github.com/phoenixnap/k8s-cloud-provider-bmc/releases/download/${RELEASE}/deployment.yaml
 ```
 
 The CCM uses multiple configuration options. See the [configuration](#Configuration) section for all of the options.
@@ -256,7 +256,7 @@ On startup, the CCM sets up the following control loop structures:
 If a loadbalancer is enabled, CCM creates a PhoenixNAP IP block and reserves an IP in the block for each `Service` of
 `type=LoadBalancer`. It tags the Reservation with the following tags:
 
-* `usage="cloud-provider-pnap-auto"`
+* `usage="k8s-cloud-provider-bmc-auto"`
 * `service="<serviceID>"` where `<serviceID>` is `<namespace>.<service-name>`.
 * `cluster=<clusterID>` where `<clusterID>` is the UID of the immutable `kube-system` namespace. We do this so that if someone runs two clusters in the same account, and there is one `Service` in each cluster with the same namespace and name, then the two IPs will not conflict.
 
@@ -280,7 +280,7 @@ In all cases, for lots of extra debugging, add `--v=2` or even higher levels, e.
 ### Docker
 
 ```
-docker run --rm -e PNAP_LOCATION=${PNAP_LOCATION} -e PNAP_LOAD_BALANCER=${PNAP_LOAD_BALANCER} phoenixnap/cloud-provider-pnap:latest --cloud-provider=phoenixnap --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
+docker run --rm -e PNAP_LOCATION=${PNAP_LOCATION} -e PNAP_LOAD_BALANCER=${PNAP_LOAD_BALANCER} phoenixnap/k8s-cloud-provider-bmc:latest --cloud-provider=phoenixnap --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
 ```
 
 ### Go toolchain
@@ -292,5 +292,5 @@ PNAP_LOCATION=${PNAP_LOCATION} PNAP_LOAD_BALANCER=${PNAP_LOAD_BALANCER} go run .
 ### Locally compiled binary
 
 ```
-PNAP_LOCATION=${PNAP_LOCATION} dist/bin/cloud-provider-pnap-darwin-amd64 --cloud-provider=phoenixnap --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
+PNAP_LOCATION=${PNAP_LOCATION} dist/bin/k8s-cloud-provider-bmc-darwin-amd64 --cloud-provider=phoenixnap --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
 ```

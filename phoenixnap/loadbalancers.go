@@ -7,10 +7,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/phoenixnap/cloud-provider-pnap/phoenixnap/loadbalancers"
-	pnapl2 "github.com/phoenixnap/cloud-provider-pnap/phoenixnap/loadbalancers/pnap-l2"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
 	"github.com/phoenixnap/go-sdk-bmc/tagapi"
+	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/loadbalancers"
+	pnapl2 "github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/loadbalancers/pnap-l2"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
