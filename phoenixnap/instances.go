@@ -114,7 +114,7 @@ func serverByID(client *bmcapi.APIClient, id string) (*bmcapi.Server, error) {
 	klog.V(2).Infof("called serverByID with ID %s", id)
 	server, resp, err := client.ServersApi.ServersServerIdGet(context.Background(), id).Execute()
 
-	if resp.StatusCode == 404 {
+	if resp.StatusCode == 404 || resp.StatusCode == 403 {
 		return nil, cloudprovider.InstanceNotFound
 	}
 	if err != nil {
