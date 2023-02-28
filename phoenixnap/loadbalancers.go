@@ -45,6 +45,11 @@ func newLoadBalancers(ipClient *ipapi.APIClient, tagClient *tagapi.APIClient, k8
 		return nil, nil
 	}
 
+	// if we did not specify a location, then we cannot proceed
+	if location == "" {
+		return nil, fmt.Errorf("no location specified, cannot proceed")
+	}
+
 	// get the UID of the kube-system namespace
 	systemNamespace, err := k8sclient.CoreV1().Namespaces().Get(context.Background(), "kube-system", metav1.GetOptions{})
 	if err != nil {
