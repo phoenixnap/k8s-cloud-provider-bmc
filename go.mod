@@ -20,6 +20,8 @@ require (
 	k8s.io/klog/v2 v2.30.0
 )
 
+require github.com/phoenixnap/go-sdk-bmc/networkapi v1.1.3 // indirect
+
 require (
 	cloud.google.com/go/compute/metadata v0.2.1 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect

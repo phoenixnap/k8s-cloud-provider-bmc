@@ -416,6 +416,8 @@ github.com/phoenixnap/go-sdk-bmc/bmcapi v1.2.2 h1:U+GIAzjwIQa+xmr9EVUO5HWuawTcNE
 github.com/phoenixnap/go-sdk-bmc/bmcapi v1.2.2/go.mod h1:VyiO4HOscCgS731zd1iKfuXW40/FPMEJWbTML/mUX4Y=
 github.com/phoenixnap/go-sdk-bmc/ipapi v1.1.2 h1:2k8RPyvg7aQpoW/TOn+p2XIqYl2qIybu/gG/uWp0sG8=
 github.com/phoenixnap/go-sdk-bmc/ipapi v1.1.2/go.mod h1:TUKmoH9RuyGw1qDa4K0beKqIQCTOPiOv2VEb4DM31Bo=
+github.com/phoenixnap/go-sdk-bmc/networkapi v1.1.3 h1:oRMzz2rPc5uMQfrWs1Art4ZuThSG5+W3z/Riga65Pk8=
+github.com/phoenixnap/go-sdk-bmc/networkapi v1.1.3/go.mod h1:/6ucaWMmv/WcqoDL4ofxdRMELtXX3EaI2aWT0ZxR+so=
 github.com/phoenixnap/go-sdk-bmc/tagapi v1.1.3 h1:w2/8QdbsjyoMQ1LBBsF671fCyDHc6qBt0pjhcklYpQ4=
 github.com/phoenixnap/go-sdk-bmc/tagapi v1.1.3/go.mod h1:1TG6NrC5GGz2IJzYXyScor+AJjDTkJqoR0y1BuxGuaI=
 github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=

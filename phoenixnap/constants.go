@@ -8,8 +8,9 @@ const (
 	serviceNameTag              = "serviceName"
 	ccmIPDescription            = "PhoenixNAP Kubernetes CCM auto-generated for Load Balancer"
 	DefaultAnnotationIPLocation = "phoenixnap.com/ip-location"
-	serviceBlockCidr            = 31
+	serviceBlockCidr            = 29
 	serverCategory              = "SERVER"
+	publicNetwork               = "PUBLIC_NETWORK"
 )
 
 var (

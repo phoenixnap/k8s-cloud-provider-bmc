@@ -1,5 +1,5 @@
 // empty loadbalancer that does nothing, but exists to enable bgp functionality
-package empty
+package kubevip
 
 import (
 	"context"

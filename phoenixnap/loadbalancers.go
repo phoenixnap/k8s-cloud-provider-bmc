@@ -3,14 +3,17 @@ package phoenixnap
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"strings"
 
+	"github.com/apparentlymart/go-cidr/cidr"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
+	netapi "github.com/phoenixnap/go-sdk-bmc/networkapi"
 	"github.com/phoenixnap/go-sdk-bmc/tagapi"
 	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/loadbalancers"
-	pnapl2 "github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/loadbalancers/pnap-l2"
+	kubevip "github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/loadbalancers/kubevip"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,22 +25,24 @@ import (
 type loadBalancers struct {
 	ipClient             *ipapi.APIClient
 	tagClient            *tagapi.APIClient
+	netClient            *netapi.APIClient
 	k8sclient            kubernetes.Interface
 	location             string
 	clusterID            string
 	implementor          loadbalancers.LB
 	implementorConfig    string
 	ipLocationAnnotation string
+	network              string
 	nodeSelector         labels.Selector
 }
 
-func newLoadBalancers(ipClient *ipapi.APIClient, tagClient *tagapi.APIClient, k8sclient kubernetes.Interface, location, config string, ipLocationAnnotation, nodeSelector string) (*loadBalancers, error) {
+func newLoadBalancers(ipClient *ipapi.APIClient, tagClient *tagapi.APIClient, netclient *netapi.APIClient, k8sclient kubernetes.Interface, location, config string, ipLocationAnnotation, nodeSelector string) (*loadBalancers, error) {
 	selector := labels.Everything()
 	if nodeSelector != "" {
 		selector, _ = labels.Parse(nodeSelector)
 	}
 
-	l := &loadBalancers{ipClient, tagClient, k8sclient, location, "", nil, config, ipLocationAnnotation, selector}
+	l := &loadBalancers{ipClient, tagClient, netclient, k8sclient, location, "", nil, config, ipLocationAnnotation, "", selector}
 
 	// parse the implementor config and see what kind it is - allow for no config
 	if l.implementorConfig == "" {
@@ -63,12 +68,15 @@ func newLoadBalancers(ipClient *ipapi.APIClient, tagClient *tagapi.APIClient, k8
 	if err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
+	if u.Host == "" {
+		return nil, fmt.Errorf("invalid config: no public network provided")
+	}
 	lbconfig := u.Path
 	var impl loadbalancers.LB
 	switch u.Scheme {
-	case "pnap-l2":
-		klog.Info("loadbalancer implementation enabled: pnap-l2")
-		impl = pnapl2.NewLB(k8sclient, lbconfig)
+	case "kube-vip":
+		klog.Infof("loadbalancer implementation enabled: kube-vip on public network %s", lbconfig)
+		impl = kubevip.NewLB(k8sclient, lbconfig)
 	default:
 		klog.Info("loadbalancer implementation disabled")
 		impl = nil
@@ -76,6 +84,7 @@ func newLoadBalancers(ipClient *ipapi.APIClient, tagClient *tagapi.APIClient, k8
 
 	l.clusterID = string(systemNamespace.UID)
 	l.implementor = impl
+	l.network = u.Host
 	klog.V(2).Info("loadBalancers.init(): complete")
 	return l, nil
 }
@@ -122,6 +131,24 @@ func (l *loadBalancers) GetLoadBalancer(ctx context.Context, clusterName string,
 	if !network.Contains(svcIP) {
 		klog.V(2).Infof("block %s does not contain IP %s", block.Cidr, svcIP)
 		return nil, false, fmt.Errorf("block %s does not contain IP %s", block.Cidr, svcIP)
+	}
+
+	// see that it is connected to the correct network
+	if block.AssignedResourceType == nil {
+		klog.V(2).Infof("block %s has no assigned resource type", block.Cidr)
+		return nil, false, fmt.Errorf("block %s has no assigned resource type", block.Cidr)
+	}
+	if *block.AssignedResourceType != publicNetwork {
+		klog.V(2).Infof("block %s is not assigned to a public network", block.Cidr)
+		return nil, false, fmt.Errorf("block %s is not assigned to a public network", block.Cidr)
+	}
+	if block.AssignedResourceId == nil {
+		klog.V(2).Infof("block %s has no assigned resource ID", block.Cidr)
+		return nil, false, fmt.Errorf("block %s has no assigned resource ID", block.Cidr)
+	}
+	if *block.AssignedResourceId != l.network {
+		klog.V(2).Infof("block %s is assigned to network %s instead of expected %s", block.Cidr, block.AssignedResourceId, l.network)
+		return nil, false, fmt.Errorf("block %s is assigned to network %s instead of expected %s", block.Cidr, *block.AssignedResourceId, l.network)
 	}
 
 	klog.V(2).Infof("GetLoadBalancer(): %s with existing IP assignment %s", svcName, svcIP)
@@ -193,12 +220,31 @@ func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 			return nil, fmt.Errorf("unable to create new IP block: %w", err)
 		}
 	}
-	network, err := netip.ParsePrefix(block.Cidr)
+	if block.AssignedResourceType != nil {
+		if *block.AssignedResourceType != publicNetwork {
+			return nil, fmt.Errorf("block %s is assigned to %s and not to a public network", block.Cidr, *block.AssignedResourceType)
+		}
+		if block.AssignedResourceId == nil {
+			return nil, fmt.Errorf("block %s has an assigned resource type %s but not ID", block.Cidr, *block.AssignedResourceType)
+		}
+		if *block.AssignedResourceId != l.network {
+			return nil, fmt.Errorf("block %s is assigned to network %s instead of expected %s", block.Cidr, *block.AssignedResourceId, l.network)
+		}
+		// at this point, it is assigned and to our network
+	} else {
+		// it all was nil, so assign it
+		if _, _, err := l.netClient.PublicNetworksApi.PublicNetworksNetworkIdIpBlocksPost(context.Background(), l.network).PublicNetworkIpBlock(*netapi.NewPublicNetworkIpBlock(block.Id)).Execute(); err != nil {
+			return nil, fmt.Errorf("unable to assign block %s to network %s: %w", block.Cidr, l.network, err)
+		}
+	}
+
+	_, ipnet, err := net.ParseCIDR(block.Cidr)
 	if err != nil {
 		klog.V(2).Infof("invalid CIDR %s: %s", block.Cidr, err)
 		return nil, fmt.Errorf("invalid CIDR in block %s: %w", block.Cidr, err)
 	}
-	foundIP = network.Addr().Next().String()
+	_, bcast := cidr.AddressRange(ipnet)
+	foundIP = bcast.String()
 	// assign the second IP in the block to this service
 
 	ipCidr, err := l.addService(ctx, service, foundIP, filterNodes(nodes, l.nodeSelector))
@@ -267,10 +313,39 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	if len(blocks) > 1 {
 		return fmt.Errorf("multiple IP blocks found for %s, cannot delete", svcName)
 	}
-
-	if _, _, err := l.ipClient.IPBlocksApi.IpBlocksIpBlockIdDelete(context.Background(), blocks[0].Id).Execute(); err != nil {
-		return fmt.Errorf("unable to update tags reservations: %w", err)
+	// unassign it
+	if _, _, err := l.netClient.PublicNetworksApi.PublicNetworksNetworkIdIpBlocksIpBlockIdDelete(context.Background(), l.network, blocks[0].Id).Execute(); err != nil {
+		return fmt.Errorf("unable to unassign IP block %s from network %s: %w", blocks[0].Id, l.network, err)
 	}
+	// that can take a while, so spin up a goroutine to delete the block
+	go func() {
+		// wait for the block to be unassigned
+		for {
+			blocks, err := l.getIPBlocks(service.Namespace, service.Name)
+			if err != nil {
+				klog.Errorf("unable to retrieve IP reservations: %s", err)
+				break
+			}
+			// no blocks found, so exist
+			if len(blocks) == 0 {
+				break
+			}
+			if len(blocks) > 1 {
+				klog.Errorf("multiple IP blocks found for %s, cannot delete", svcName)
+				break
+			}
+			// see if it is unassigned
+			if blocks[0].AssignedResourceId != nil {
+				klog.Infof("block %s still assigned, waiting", blocks[0].Id)
+				continue
+			}
+			// it is unassigned, delete the block
+			if _, _, err := l.ipClient.IPBlocksApi.IpBlocksIpBlockIdDelete(context.Background(), blocks[0].Id).Execute(); err != nil {
+				klog.Errorf("unable to delete IP block: %w", err)
+				break
+			}
+		}
+	}()
 
 	klog.V(2).Infof("EnsureLoadBalancerDeleted(): remove: removed service %s from implementation", svcName)
 	return nil
