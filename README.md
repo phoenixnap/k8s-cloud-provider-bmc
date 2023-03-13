@@ -22,6 +22,48 @@ Recommended versions of PhoenixNAP CCM based on your Kubernetes version:
 
 * PhoenixNAP CCM version v1.0.0+ supports Kubernetes version >=1.20.0
 
+### Load Balancer
+
+If you plan on using services of `type=LoadBalancer`, then you have several prerequisites:
+
+1. PhoenixNAP public network on which all nodes are connected.
+1. VLAN-specific interface on each node.
+1. Software that can announce the IP address of the load balancer to the upstream switch via ARP.
+
+#### Public Network
+
+Every PhoenixNAP server deployed includes one private network and, optionally, one public network.
+The private network links all of your servers, while the public network is used to connect your servers
+to the Internet. The public network sits on a VLAN which is connected only to your server and the
+upstream switch.
+
+To route a newly assigned IP to any one of your servers, you need a new public network. Ensure that all
+of the servers to which you want to route traffic are connected to a dedicated public
+network, _not including_ the one that came with your server by default.
+
+
+Read [this KnowledgeBase article](https://phoenixnap.com/kb/bare-metal-cloud-portal-quick-start-guide#ftoc-heading-30)
+on public networks.
+
+#### VLAN-specific interface
+
+In order for each server to be able to handle traffic from the dedicated public network, it needs
+a virtual interface, on top of its default physical interface, with the correct VLAN.
+
+Read [this KnowledgeBase article](https://phoenixnap.com/kb/configure-bmc-server-after-adding-to-network)
+on configuring a VLAN-specific interface for your public network.
+
+#### Load Balancer Software
+
+As all of the networking is in a VLAN, i.e. layer 2, load-balancing software must support
+announcing IP addresses via Layer 2 ARP.
+
+As of this writing, the supported load-balancer software is [kube-vip](https://kube-vip.io).
+
+In the future, this CCM may support other arp-based load-balancer software, such as
+[metallb](https://metallb.universe.tf). It may also support BGP, if and when PhoenixNAP BGP
+support is in place.
+
 ## Deployment
 
 **TL;DR**
@@ -110,6 +152,14 @@ kubectl apply -f https://github.com/phoenixnap/k8s-cloud-provider-bmc/releases/d
 
 The CCM uses multiple configuration options. See the [configuration](#Configuration) section for all of the options.
 
+### Deploy Load Balancer
+
+If you want load balancing to work as well, deploy a supported load-balancer.
+
+CCM provides the correct logic, if necessary, to manage load balancer configs for supported load-balancers.
+
+See further in this document under loadbalancing, for details.
+
 ### Logging
 
 By default, ccm does minimal logging, relying on the supporting infrastructure from kubernetes. However, it does support
@@ -163,7 +213,8 @@ For a Service of `type=LoadBalancer` CCM will create one using the PhoenixNAP AP
 so load balancers can consume them.
 
 PhoenixNAP's API does not support adding tags to individual IP addresses, while it has full support for tags on blocks.
-Each block created is of type `/31`. The first IP is for the network, the second is used for the service.
+Each block created is of type `/29`. The first IP is for the network, the second is for the gateway,
+the third is for the Service.
 PhoenixNAP CCM uses tags to mark IP blocks as assigned to specific services.
 
 Each block is given 3 tags:
@@ -179,9 +230,10 @@ for a namespace and a service name are valid for a tag value, the `/` character 
 When CCM encounters a `Service` of `type=LoadBalancer`, it will use the PhoenixNAP API to:
 
 1. Look for a block of public IP addresses with the cluster and constant PhoenixNAP tags, as well as the tag `service=<serviceID>`. Else:
-2. Request a new, location-specific `/31` IP block and tag it appropriately.
-3. Use the last IP in the block for the service.
+2. Request a new, location-specific `/29` IP block and tag it appropriately.
+3. Use the first available IP in the block, i.e. the third, for the Service.
 4. Set the IP to `Service.Spec.LoadBalancerIP`.
+5. Pass control to the specific load-balancer implementation.
 
 #### Service Load Balancer IP Location
  
@@ -216,31 +268,39 @@ The value of the loadbalancing configuration is `<type>:///<detail>` where:
 
 For loadbalancing for Kubernetes `Service` of `type=LoadBalancer`, the following implementations are supported:
 
-* [pnap-l2](#pnap-l2)
+* [kube-vip](#kube-vip)
 
-##### pnap-l2
+CCM itself does not deploy the load-balancer or any part of it, including maintenance ConfigMaps. It
+only works with existing resources to configure them.
 
-When the `pnap-l2` option is enabled, for user-deployed Kubernetes `Service` of `type=LoadBalancer`,
-the PhoenixNAP CCM assigns an IP from a block for each such `Service`. If necessary, it first creates the block.
+##### kube-vip
+
+When the `kube-vip` option is enabled, for user-deployed Kubernetes `Service` of `type=LoadBalancer`,
+the PhoenixNAP CCM assigns a block, and the third IP from that block, for each such `Service`. If
+necessary, it first creates the block.
 
 To enable it, set the configuration `PNAP_LOAD_BALANCER` or config `loadbalancer` to:
 
 ```
-pnap-l2://
+kube-vip://<public-network-ID>
 ```
 
-If `pnap-l2` management is enabled, then CCM does the following.
+Directions on configuring kube-vip in arp mode are available at the [kube-vip site](https://kube-vip.io/#arp).
+
+
+If `kube-vip` management is enabled, then CCM does the following.
 
 1. For each node currently in the cluster or added:
    * retrieve the node's PhoenixNAP ID via the node provider ID
    * add the information to appropriate annotations on the node
-1. For each service of `type=LoadBalancer` currently in the cluster or added:
-   * if an IP block with the appropriate tags exists, and the `Service` already has that IP address affiliated with it, it is ready; ignore
-   * if an IP block with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core)
-   * if an IP block with the appropriate tags does not exist, create a new IP block, allocate an IP and add it to the services spec 
-1. For each service of `type=LoadBalancer` deleted from the cluster:
-   * find the IP address from the service spec and remove it
-   * find the block with the appropriate tags and delete it
+1. For each service of `type=LoadBalancer` currently in the cluster or added, ensure that:
+   * an IP block with the appropriate tags exists or create it
+   * the IP block is associated with the public network
+   * the `Service` has that IP address affiliated with it in the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core) or affiliate it
+1. For each service of `type=LoadBalancer` deleted from the cluster, ensure:
+   * the IP address is removed from the service spec
+   * the IP block is disassociated from the public network
+   * the IP block is deleted
 
 ## Core Control Loop
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
+	netapi "github.com/phoenixnap/go-sdk-bmc/networkapi"
 	"github.com/phoenixnap/go-sdk-bmc/tagapi"
 	"golang.org/x/oauth2/clientcredentials"
 	cloudprovider "k8s.io/cloud-provider"
@@ -29,6 +30,7 @@ type cloud struct {
 	bmcClient    *bmcapi.APIClient
 	ipClient     *ipapi.APIClient
 	tagClient    *tagapi.APIClient
+	netClient    *netapi.APIClient
 	config       Config
 	instances    *instances
 	loadBalancer *loadBalancers
@@ -36,11 +38,12 @@ type cloud struct {
 
 var _ cloudprovider.Interface = (*cloud)(nil)
 
-func newCloud(pnapConfig Config, bmcClient *bmcapi.APIClient, ipClient *ipapi.APIClient, tagClient *tagapi.APIClient) (cloudprovider.Interface, error) {
+func newCloud(pnapConfig Config, bmcClient *bmcapi.APIClient, ipClient *ipapi.APIClient, tagClient *tagapi.APIClient, netClient *netapi.APIClient) (cloudprovider.Interface, error) {
 	return &cloud{
 		bmcClient: bmcClient,
 		ipClient:  ipClient,
 		tagClient: tagClient,
+		netClient: netClient,
 		config:    pnapConfig,
 	}, nil
 }
@@ -81,7 +84,12 @@ func init() {
 		tagConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
 		tagClient := tagapi.NewAPIClient(tagConfiguration)
 
-		cloud, err := newCloud(pnapConfig, bmcClient, ipClient, tagClient)
+		netConfiguration := netapi.NewConfiguration()
+		netConfiguration.HTTPClient = ccConfig.Client(context.Background())
+		netConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
+		netClient := netapi.NewAPIClient(netConfiguration)
+
+		cloud, err := newCloud(pnapConfig, bmcClient, ipClient, tagClient, netClient)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new cloud handler: %w", err)
 		}
@@ -98,7 +106,7 @@ func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, 
 	clientset := clientBuilder.ClientOrDie("cloud-provider-phoenixnap-shared-informers")
 
 	// initialize the individual services
-	lb, err := newLoadBalancers(c.ipClient, c.tagClient, clientset, c.config.Location, c.config.LoadBalancerSetting, c.config.AnnotationIPLocation, c.config.ServiceNodeSelector)
+	lb, err := newLoadBalancers(c.ipClient, c.tagClient, c.netClient, clientset, c.config.Location, c.config.LoadBalancerSetting, c.config.AnnotationIPLocation, c.config.ServiceNodeSelector)
 	if err != nil {
 		klog.Fatalf("could not initialize LoadBalancers: %v", err)
 	}

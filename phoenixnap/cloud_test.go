@@ -10,6 +10,7 @@ import (
 	"github.com/phoenixnap/go-sdk-bmc/billingapi"
 	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
+	netapi "github.com/phoenixnap/go-sdk-bmc/networkapi"
 	"github.com/phoenixnap/go-sdk-bmc/tagapi"
 	pnapServer "github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server"
 	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server/store"
@@ -71,7 +72,7 @@ func testGetValidCloud(t *testing.T, LoadBalancerSetting string) (*cloud, *store
 	url, _ := url.Parse(ts.URL)
 	urlString := url.String()
 
-	bmc, _, ip, tag, err := constructClients(token, urlString)
+	bmc, _, ip, tag, netClient, err := constructClients(token, urlString)
 	if err != nil {
 		t.Fatalf("unable to construct testing phoenixnap API client: %v", err)
 	}
@@ -80,7 +81,7 @@ func testGetValidCloud(t *testing.T, LoadBalancerSetting string) (*cloud, *store
 	config := Config{
 		LoadBalancerSetting: LoadBalancerSetting,
 	}
-	c, _ := newCloud(config, bmc, ip, tag)
+	c, _ := newCloud(config, bmc, ip, tag, netClient)
 	ccb := &mockControllerClientBuilder{}
 	c.Initialize(ccb, nil)
 
@@ -181,7 +182,7 @@ func TestHasClusterID(t *testing.T) {
 }
 
 // builds a phoenixnap client
-func constructClients(authToken, baseURL string) (bmc *bmcapi.APIClient, billing *billingapi.APIClient, ip *ipapi.APIClient, tag *tagapi.APIClient, err error) {
+func constructClients(authToken, baseURL string) (bmc *bmcapi.APIClient, billing *billingapi.APIClient, ip *ipapi.APIClient, tag *tagapi.APIClient, netClient *netapi.APIClient, err error) {
 	// set up our client and create the cloud interface
 
 	var u *url.URL
@@ -227,6 +228,14 @@ func constructClients(authToken, baseURL string) (bmc *bmcapi.APIClient, billing
 	tagConfiguration.Host = u.Host
 	tagConfiguration.Scheme = u.Scheme
 	tag = tagapi.NewAPIClient(tagConfiguration)
+
+	netConfiguration := netapi.NewConfiguration()
+	netConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
+
+	// these are for changing the server target
+	netConfiguration.Host = u.Host
+	netConfiguration.Scheme = u.Scheme
+	netClient = netapi.NewAPIClient(netConfiguration)
 
 	return
 

@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/apparentlymart/go-cidr/cidr"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
@@ -85,6 +86,40 @@ func newLoadBalancers(ipClient *ipapi.APIClient, tagClient *tagapi.APIClient, ne
 	l.clusterID = string(systemNamespace.UID)
 	l.implementor = impl
 	l.network = u.Host
+
+	// start the reaper for blocks indicated for deletion
+	go func() {
+		ticker := time.NewTicker(gcIterationSeconds * time.Second)
+
+		for {
+			select {
+			case <-ticker.C:
+				blocks, err := l.getIPBlocks("", "", false)
+				if err != nil {
+					klog.Errorf("unable to retrieve IP blocks: %w", err)
+					continue
+				}
+				if len(blocks) == 0 {
+					klog.Error("no inactive blocks found")
+					continue
+				}
+				for _, block := range blocks {
+					switch block.Status {
+					case "unassigned":
+						klog.Infof("deleting unassigned block %s", block.Id)
+						// it is unassigned, delete the block
+						if _, _, err := l.ipClient.IPBlocksApi.IpBlocksIpBlockIdDelete(context.Background(), block.Id).Execute(); err != nil {
+							klog.Errorf("unable to delete IP block: %w", err)
+						}
+					case "unassigning":
+						klog.Infof("block %s still unassigning, waiting", block.Id)
+					default:
+						klog.Infof("block %s is active, skipping", block.Id)
+					}
+				}
+			}
+		}
+	}()
 	klog.V(2).Info("loadBalancers.init(): complete")
 	return l, nil
 }
@@ -107,7 +142,7 @@ func (l *loadBalancers) GetLoadBalancer(ctx context.Context, clusterName string,
 		return nil, false, fmt.Errorf("invalid service IP %s: %w", service.Spec.LoadBalancerIP, err)
 	}
 
-	blocks, err := l.getIPBlocks(service.Namespace, service.Name)
+	blocks, err := l.getIPBlocks(service.Namespace, service.Name, true)
 	if err != nil {
 		return nil, false, err
 	}
@@ -183,7 +218,7 @@ func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 
 	// no error, but no existing load balancer, so create one
 	svcName := serviceRep(service)
-	blocks, err := l.getIPBlocks(service.Namespace, service.Name)
+	blocks, err := l.getIPBlocks(service.Namespace, service.Name, true)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +245,7 @@ func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 			{Name: serviceNamespaceTag, Value: &service.Namespace},
 			{Name: serviceNameTag, Value: &service.Name},
 		}
-		if err := ensureTags(l.tagClient, pnapTag, clsTag, serviceNamespaceTag, serviceNameTag); err != nil {
+		if err := ensureTags(l.tagClient, pnapTag, clsTag, serviceNamespaceTag, serviceNameTag, deleteTag); err != nil {
 			return nil, fmt.Errorf("unable to ensure tags exist: %w", err)
 		}
 		ipBlockCreate.Tags = append(ipBlockCreate.Tags, tags...)
@@ -300,7 +335,7 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 
 	// tags for Get() are separated via '.', so '<key>.<value>'
 	// get IP address blocks and check if any exist for this svc
-	blocks, err := l.getIPBlocks(service.Namespace, service.Name)
+	blocks, err := l.getIPBlocks(service.Namespace, service.Name, true)
 	if err != nil {
 		return fmt.Errorf("unable to retrieve IP reservations: %w", err)
 	}
@@ -317,35 +352,24 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	if _, _, err := l.netClient.PublicNetworksApi.PublicNetworksNetworkIdIpBlocksIpBlockIdDelete(context.Background(), l.network, blocks[0].Id).Execute(); err != nil {
 		return fmt.Errorf("unable to unassign IP block %s from network %s: %w", blocks[0].Id, l.network, err)
 	}
-	// that can take a while, so spin up a goroutine to delete the block
-	go func() {
-		// wait for the block to be unassigned
-		for {
-			blocks, err := l.getIPBlocks(service.Namespace, service.Name)
-			if err != nil {
-				klog.Errorf("unable to retrieve IP reservations: %s", err)
-				break
-			}
-			// no blocks found, so exist
-			if len(blocks) == 0 {
-				break
-			}
-			if len(blocks) > 1 {
-				klog.Errorf("multiple IP blocks found for %s, cannot delete", svcName)
-				break
-			}
-			// see if it is unassigned
-			if blocks[0].AssignedResourceId != nil {
-				klog.Infof("block %s still assigned, waiting", blocks[0].Id)
-				continue
-			}
-			// it is unassigned, delete the block
-			if _, _, err := l.ipClient.IPBlocksApi.IpBlocksIpBlockIdDelete(context.Background(), blocks[0].Id).Execute(); err != nil {
-				klog.Errorf("unable to delete IP block: %w", err)
-				break
-			}
+	// add the delete tag to the block; this will cause the other loop to delete it
+	tags := blocks[0].Tags
+	var tagRequest []ipapi.TagAssignmentRequest
+	for _, tag := range tags {
+		if tag.Name == serviceNameTag || tag.Name == serviceNamespaceTag {
+			continue
 		}
-	}()
+		tagRequest = append(tagRequest, ipapi.TagAssignmentRequest{
+			Name:  tag.Name,
+			Value: tag.Value,
+		})
+	}
+	valtrue := "true"
+	tagRequest = append(tagRequest, ipapi.TagAssignmentRequest{Name: deleteTag, Value: &valtrue})
+
+	if _, _, err := l.ipClient.IPBlocksApi.IpBlocksIpBlockIdTagsPut(context.Background(), blocks[0].Id).TagAssignmentRequest(tagRequest).Execute(); err != nil {
+		return fmt.Errorf("unable to remove active tag from IP block %s: %w", blocks[0].Id, err)
+	}
 
 	klog.V(2).Infof("EnsureLoadBalancerDeleted(): remove: removed service %s from implementation", svcName)
 	return nil
@@ -353,15 +377,48 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 
 // utility funcs
 
-// getIPBlocks returns cluster-related IP blocks
-func (l *loadBalancers) getIPBlocks(namespace, name string) (blocks []ipapi.IpBlock, err error) {
+// getIPBlocks returns cluster-related IP blocks. If namespace or name is not blank, filters search
+// by IP blocks with those tags. If activeOnly is true, will not return blocks with the delete tag set.
+func (l *loadBalancers) getIPBlocks(namespace, name string, activeOnly bool) (blocks []ipapi.IpBlock, err error) {
 	clsTag, clsValue := clusterTag(l.clusterID)
 
 	// tags for Get() are separated via '.', so '<key>.<value>'
-	tags := []string{fmt.Sprintf("%s.%s", serviceNamespaceTag, namespace), fmt.Sprintf("%s.%s", serviceNameTag, name), fmt.Sprintf("%s.%s", clsTag, clsValue), fmt.Sprintf("%s.%s", pnapTag, pnapValue)}
+	tags := []string{fmt.Sprintf("%s.%s", clsTag, clsValue), fmt.Sprintf("%s.%s", pnapTag, pnapValue)}
+	if name != "" {
+		tags = append(tags, fmt.Sprintf("%s.%s", serviceNameTag, name))
+	}
+	if namespace != "" {
+		tags = append(tags, fmt.Sprintf("%s.%s", serviceNamespaceTag, namespace))
+	}
 	// get IP address blocks and check if any has an IP that matches this service
 	blocks, _, err = l.ipClient.IPBlocksApi.IpBlocksGet(context.Background()).Tag(tags).Execute()
+	if err != nil {
+		return
+	}
+	if activeOnly {
+		// filter out any that are not active
+		var active []ipapi.IpBlock
+		for _, b := range blocks {
+			var skipBlock bool
+			for _, tags := range b.Tags {
+				if tags.Name == deleteTag {
+					skipBlock = true
+					break
+				}
+			}
+			if !skipBlock {
+				active = append(active, b)
+			}
+		}
+		blocks = active
+	}
+	return
+}
 
+// getIPBlock returns current status of a single block
+func (l *loadBalancers) getIPBlock(id string) (block *ipapi.IpBlock, err error) {
+	// get IP address blocks and check if any has an IP that matches this service
+	block, _, err = l.ipClient.IPBlocksApi.IpBlocksIpBlockIdGet(context.Background(), id).Execute()
 	return
 }
 

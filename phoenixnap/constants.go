@@ -4,11 +4,14 @@ const (
 	pnapIdentifier              = "cloud-provider-phoenixnap-auto"
 	pnapTag                     = "usage"
 	pnapValue                   = pnapIdentifier
+	deleteTag                   = "delete"
+	activeValue                 = "true"
 	serviceNamespaceTag         = "serviceNamespace"
 	serviceNameTag              = "serviceName"
 	ccmIPDescription            = "PhoenixNAP Kubernetes CCM auto-generated for Load Balancer"
 	DefaultAnnotationIPLocation = "phoenixnap.com/ip-location"
 	serviceBlockCidr            = 29
+	gcIterationSeconds          = 30
 	serverCategory              = "SERVER"
 	publicNetwork               = "PUBLIC_NETWORK"
 )
