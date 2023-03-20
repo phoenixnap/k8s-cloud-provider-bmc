@@ -13,7 +13,8 @@ const (
 	serviceBlockCidr            = 29
 	gcIterationSeconds          = 30
 	serverCategory              = "SERVER"
-	publicNetwork               = "PUBLIC_NETWORK"
+	publicNetworkCaps           = "PUBLIC_NETWORK"
+	publicNetwork               = "public network"
 )
 
 var (

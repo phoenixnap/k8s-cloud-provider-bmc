@@ -89,30 +89,31 @@ func newLoadBalancers(ipClient *ipapi.APIClient, tagClient *tagapi.APIClient, ne
 	go func() {
 		ticker := time.NewTicker(gcIterationSeconds * time.Second)
 
-		for {
-			select {
-			case <-ticker.C:
-				blocks, err := l.getIPBlocks("", "", false)
-				if err != nil {
-					klog.Errorf("unable to retrieve IP blocks: %w", err)
-					continue
-				}
-				if len(blocks) == 0 {
-					klog.Error("no inactive blocks found")
-					continue
-				}
-				for _, block := range blocks {
-					switch block.Status {
-					case "unassigned":
-						klog.Infof("deleting unassigned block %s", block.Id)
-						// it is unassigned, delete the block
-						if _, _, err := l.ipClient.IPBlocksApi.IpBlocksIpBlockIdDelete(context.Background(), block.Id).Execute(); err != nil {
-							klog.Errorf("unable to delete IP block: %w", err)
-						}
-					case "unassigning":
-						klog.Infof("block %s still unassigning, waiting", block.Id)
-					default:
-						klog.Infof("block %s is active, skipping", block.Id)
+		for range ticker.C {
+			// get deleted only
+			blocks, err := l.getIPBlocks("", "", false, true)
+			if err != nil {
+				klog.Errorf("unable to retrieve IP blocks: %w", err)
+				continue
+			}
+			if len(blocks) == 0 {
+				klog.Error("no inactive blocks found")
+				continue
+			}
+			for _, block := range blocks {
+				switch block.Status {
+				case "unassigned":
+					klog.Infof("deleting unassigned block %s", block.Id)
+					// it is unassigned, delete the block
+					if _, _, err := l.ipClient.IPBlocksApi.IpBlocksIpBlockIdDelete(context.Background(), block.Id).Execute(); err != nil {
+						klog.Errorf("unable to delete IP block: %w", err)
+					}
+				case "unassigning":
+					klog.Infof("block %s still unassigning, waiting", block.Id)
+				default:
+					// unassign it
+					if _, _, err := l.netClient.PublicNetworksApi.PublicNetworksNetworkIdIpBlocksIpBlockIdDelete(context.Background(), l.network, blocks[0].Id).Execute(); err != nil {
+						klog.Errorf("unable to unassign IP block %s from network %s: %w", blocks[0].Id, l.network, err)
 					}
 				}
 			}
@@ -140,7 +141,8 @@ func (l *loadBalancers) GetLoadBalancer(ctx context.Context, clusterName string,
 		return nil, false, fmt.Errorf("invalid service IP %s: %w", service.Spec.LoadBalancerIP, err)
 	}
 
-	blocks, err := l.getIPBlocks(service.Namespace, service.Name, true)
+	// get active only
+	blocks, err := l.getIPBlocks(service.Namespace, service.Name, true, false)
 	if err != nil {
 		return nil, false, err
 	}
@@ -171,7 +173,7 @@ func (l *loadBalancers) GetLoadBalancer(ctx context.Context, clusterName string,
 		klog.V(2).Infof("block %s has no assigned resource type", block.Cidr)
 		return nil, false, fmt.Errorf("block %s has no assigned resource type", block.Cidr)
 	}
-	if *block.AssignedResourceType != publicNetwork {
+	if *block.AssignedResourceType != publicNetwork && *block.AssignedResourceType != publicNetworkCaps {
 		klog.V(2).Infof("block %s is not assigned to a public network", block.Cidr)
 		return nil, false, fmt.Errorf("block %s is not assigned to a public network", block.Cidr)
 	}
@@ -216,7 +218,8 @@ func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 
 	// no error, but no existing load balancer, so create one
 	svcName := serviceRep(service)
-	blocks, err := l.getIPBlocks(service.Namespace, service.Name, true)
+	// get active only
+	blocks, err := l.getIPBlocks(service.Namespace, service.Name, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +257,7 @@ func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		}
 	}
 	if block.AssignedResourceType != nil {
-		if *block.AssignedResourceType != publicNetwork {
+		if *block.AssignedResourceType != publicNetwork && *block.AssignedResourceType != publicNetworkCaps {
 			return nil, fmt.Errorf("block %s is assigned to %s and not to a public network", block.Cidr, *block.AssignedResourceType)
 		}
 		if block.AssignedResourceId == nil {
@@ -333,9 +336,26 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	svcName := serviceRep(service)
 	svcIP := service.Spec.LoadBalancerIP
 
+	// first remove the IP from the loadbalancer, so it gets released
+	klog.V(2).Infof("removing IP %s from %s", svcIP, svcName)
+	intf := l.k8sclient.CoreV1().Services(service.Namespace)
+	existing, err := intf.Get(ctx, service.Name, metav1.GetOptions{})
+	if err != nil || existing == nil {
+		klog.V(2).Infof("failed to get latest for service, moving on to delete IP assignment %s: %v", svcName, err)
+	} else {
+		existing.Spec.LoadBalancerIP = ""
+		_, err = intf.Update(ctx, existing, metav1.UpdateOptions{})
+		if err != nil {
+			klog.V(2).Infof("failed to update service to remove IP %s: %v", svcName, err)
+			return fmt.Errorf("failed to update service %s: %w", svcName, err)
+		}
+		klog.V(2).Infof("successfully removed %s from service %s", svcIP, svcName)
+	}
+
 	// tags for Get() are separated via '.', so '<key>.<value>'
 	// get IP address blocks and check if any exist for this svc
-	blocks, err := l.getIPBlocks(service.Namespace, service.Name, true)
+	// active blocks only
+	blocks, err := l.getIPBlocks(service.Namespace, service.Name, true, false)
 	if err != nil {
 		return fmt.Errorf("unable to retrieve IP reservations: %w", err)
 	}
@@ -348,11 +368,7 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	if len(blocks) > 1 {
 		return fmt.Errorf("multiple IP blocks found for %s, cannot delete", svcName)
 	}
-	// unassign it
-	if _, _, err := l.netClient.PublicNetworksApi.PublicNetworksNetworkIdIpBlocksIpBlockIdDelete(context.Background(), l.network, blocks[0].Id).Execute(); err != nil {
-		return fmt.Errorf("unable to unassign IP block %s from network %s: %w", blocks[0].Id, l.network, err)
-	}
-	// add the delete tag to the block; this will cause the other loop to delete it
+	// add the delete tag to the block; this will cause the other loop to unassign it and delete it
 	tags := blocks[0].Tags
 	var tagRequest []ipapi.TagAssignmentRequest
 	for _, tag := range tags {
@@ -368,7 +384,7 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	tagRequest = append(tagRequest, ipapi.TagAssignmentRequest{Name: deleteTag, Value: &valtrue})
 
 	if _, _, err := l.ipClient.IPBlocksApi.IpBlocksIpBlockIdTagsPut(context.Background(), blocks[0].Id).TagAssignmentRequest(tagRequest).Execute(); err != nil {
-		return fmt.Errorf("unable to remove active tag from IP block %s: %w", blocks[0].Id, err)
+		return fmt.Errorf("unable to add 'delete' tag from IP block %s: %w", blocks[0].Id, err)
 	}
 
 	klog.V(2).Infof("EnsureLoadBalancerDeleted(): remove: removed service %s from implementation", svcName)
@@ -379,7 +395,7 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 
 // getIPBlocks returns cluster-related IP blocks. If namespace or name is not blank, filters search
 // by IP blocks with those tags. If activeOnly is true, will not return blocks with the delete tag set.
-func (l *loadBalancers) getIPBlocks(namespace, name string, activeOnly bool) (blocks []ipapi.IpBlock, err error) {
+func (l *loadBalancers) getIPBlocks(namespace, name string, active, deleted bool) (blocks []ipapi.IpBlock, err error) {
 	clsTag, clsValue := clusterTag(l.clusterID)
 
 	// tags for Get() are separated via '.', so '<key>.<value>'
@@ -395,23 +411,29 @@ func (l *loadBalancers) getIPBlocks(namespace, name string, activeOnly bool) (bl
 	if err != nil {
 		return
 	}
-	if activeOnly {
-		// filter out any that are not active
-		var active []ipapi.IpBlock
-		for _, b := range blocks {
-			var skipBlock bool
-			for _, tags := range b.Tags {
-				if tags.Name == deleteTag {
-					skipBlock = true
-					break
-				}
-			}
-			if !skipBlock {
-				active = append(active, b)
+
+	// if we take all blocks, just return them
+	if active && deleted {
+		return
+	}
+	var finalBlocks []ipapi.IpBlock
+
+	// arrange active and passive
+	for _, b := range blocks {
+		var isDeleted bool
+		for _, tags := range b.Tags {
+			if tags.Name == deleteTag {
+				isDeleted = true
+				break
 			}
 		}
-		blocks = active
+		// only keep the block if we asked for deleted and it is deleted,
+		// or if we asked for active and it is not deleted
+		if (isDeleted && deleted) || (!isDeleted && active) {
+			finalBlocks = append(finalBlocks, b)
+		}
 	}
+	blocks = finalBlocks
 	return
 }
 
