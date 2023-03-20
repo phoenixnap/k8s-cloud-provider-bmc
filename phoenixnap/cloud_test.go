@@ -103,9 +103,9 @@ func TestLoadBalancerDefaultDisabled(t *testing.T) {
 	}
 }
 
-func TestLoadBalancerPNAPL2(t *testing.T) {
+func TestLoadBalancerKubeVip(t *testing.T) {
 	t.Skip("Test needs a k8s client to work")
-	vc, _ := testGetValidCloud(t, "pnap-l2://")
+	vc, _ := testGetValidCloud(t, "kube-vip://")
 	response, supported := vc.LoadBalancer()
 	var (
 		expectedSupported = true

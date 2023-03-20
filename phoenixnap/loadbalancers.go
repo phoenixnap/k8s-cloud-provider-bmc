@@ -3,13 +3,11 @@ package phoenixnap
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/netip"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/apparentlymart/go-cidr/cidr"
 	"github.com/phoenixnap/go-sdk-bmc/ipapi"
 	netapi "github.com/phoenixnap/go-sdk-bmc/networkapi"
 	"github.com/phoenixnap/go-sdk-bmc/tagapi"
@@ -273,13 +271,15 @@ func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		}
 	}
 
-	_, ipnet, err := net.ParseCIDR(block.Cidr)
+	prefix, err := netip.ParsePrefix(block.Cidr)
 	if err != nil {
 		klog.V(2).Infof("invalid CIDR %s: %s", block.Cidr, err)
 		return nil, fmt.Errorf("invalid CIDR in block %s: %w", block.Cidr, err)
 	}
-	_, bcast := cidr.AddressRange(ipnet)
-	foundIP = bcast.String()
+	network := prefix.Addr()
+	// get the first free address, after network and router
+	foundIP = network.Next().Next().String()
+
 	// assign the second IP in the block to this service
 
 	ipCidr, err := l.addService(ctx, service, foundIP, filterNodes(nodes, l.nodeSelector))

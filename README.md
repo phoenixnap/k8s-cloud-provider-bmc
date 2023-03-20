@@ -330,7 +330,7 @@ You can run the CCM locally on your laptop or VM, i.e. not in the cluster. This 
 1. Set the environment variable `KUBECONFIG` to a kubeconfig file with sufficient access to the cluster, e.g. `KUBECONFIG=mykubeconfig`
 1. Set the environment variable `PNAP_LOCATION` to the correct location where the cluster is running, e.g. `PNAP_LOCATION="SEA`
 1. If you want to run a loadbalancer, and it is not yet deployed, deploy it appropriately.
-1. Enable the loadbalancer by setting the environment variable `PNAP_LOAD_BALANCER=pnap-l2://`
+1. Enable the loadbalancer by setting the environment variable `PNAP_LOAD_BALANCER=kube-vip://<network-id>`
 1. Run the command.
 
 There are multiple ways to run the command.
