@@ -114,13 +114,16 @@ func serverByID(client *bmcapi.APIClient, id string) (*bmcapi.Server, error) {
 	klog.V(2).Infof("called serverByID with ID %s", id)
 	server, resp, err := client.ServersApi.ServersServerIdGet(context.Background(), id).Execute()
 
-	if resp.StatusCode == 404 || resp.StatusCode == 403 {
+	// resp can be nil when the request never reached the API (transport
+	// error, DNS failure, timeout, etc.), so it must be nil-checked before
+	// dereferencing StatusCode, otherwise err is returned below.
+	if resp != nil && (resp.StatusCode == 404 || resp.StatusCode == 403) {
 		return nil, cloudprovider.InstanceNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return server, err
+	return server, nil
 }
 
 // serverByName returns an instance whose hostname matches the kubernetes node.Name
