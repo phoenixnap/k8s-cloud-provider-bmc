@@ -2,7 +2,10 @@ package phoenixnap
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
@@ -240,6 +243,47 @@ func TestInstanceShutdownByProviderID(t *testing.T) {
 		case down != tt.down:
 			t.Errorf("%d: mismatched down, actual %v expected %v", i, down, tt.down)
 		}
+	}
+}
+
+// TestInstanceMetadataTransportErrorDoesNotPanic is a regression test for a nil
+// pointer dereference in serverByID. The BMC SDK returns a nil *http.Response
+// together with a non-nil error whenever a request never reaches the API
+// (transport error, DNS failure, timeout, etc.). serverByID used to read
+// resp.StatusCode before checking that error, which panicked and crashed the
+// node controller. Such a failure must instead surface as an error, and must
+// not be misreported as InstanceNotFound (which could cause a healthy node to
+// be deleted on a transient network blip).
+func TestInstanceMetadataTransportErrorDoesNotPanic(t *testing.T) {
+	// Stand up a server only to obtain a real, free address, then immediately
+	// close it so every subsequent connection is refused. This deterministically
+	// drives the SDK's Execute() into its "nil response, non-nil error" path.
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := ts.URL
+	ts.Close()
+
+	bmc, _, _, _, _, err := constructClients(token, deadURL)
+	if err != nil {
+		t.Fatalf("unable to construct testing phoenixnap API client: %v", err)
+	}
+	inst := newInstances(bmc)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("InstanceMetadata panicked on unreachable BMC API: %v", r)
+		}
+	}()
+
+	node := testNode(fmt.Sprintf("phoenixnap://%s", randomID), nodeName)
+	md, err := inst.InstanceMetadata(context.TODO(), node)
+	if err == nil {
+		t.Fatal("expected an error when the BMC API is unreachable, got nil")
+	}
+	if errors.Is(err, cloudprovider.InstanceNotFound) {
+		t.Errorf("a transport error must not be reported as InstanceNotFound, got %v", err)
+	}
+	if md != nil {
+		t.Errorf("expected nil metadata on transport error, got %+v", md)
 	}
 }
 
