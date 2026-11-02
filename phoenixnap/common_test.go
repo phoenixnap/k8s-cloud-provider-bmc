@@ -3,12 +3,9 @@ package phoenixnap
 import (
 	"fmt"
 	"math/rand"
-	"net"
 
 	"github.com/google/uuid"
-	randomdata "github.com/pallinder/go-randomdata"
-	"github.com/phoenixnap/go-sdk-bmc/billingapi"
-	"github.com/phoenixnap/go-sdk-bmc/ipapi"
+	"github.com/phoenixnap/go-sdk-bmc/billingapi/v4"
 	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server/store"
 )
 
@@ -68,19 +65,4 @@ func testGetOrCreateValidServerProduct(name, location string, backend store.Data
 // testGetNewServerName get a unique server name
 func testGetNewServerName() string {
 	return fmt.Sprintf("server-%d", rand.Intn(1000))
-}
-
-func testCreateAddressBlock(public bool, location string, size int) *ipapi.IpBlock {
-	ipaddr := randomdata.IpV4Address()
-	// just mask it
-	ip := net.ParseIP(ipaddr)
-	addr := ip.Mask(net.CIDRMask(size, 29))
-	id, _ := uuid.NewUUID()
-	address := ipapi.IpBlock{
-		Id:            id.String(),
-		Location:      location,
-		CidrBlockSize: fmt.Sprintf("%d", size),
-		Cidr:          fmt.Sprintf("%s/%d", addr.String(), size),
-	}
-	return &address
 }

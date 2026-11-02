@@ -1,7 +1,7 @@
 SHELL=/bin/sh
 BINARY ?= cloud-provider-phoenixnap
 BUILD_IMAGE?=phoenixnap/cloud-provider-phoenixnap
-BUILDER_IMAGE?=golang:1.17-alpine3.15
+BUILDER_IMAGE?=golang:1.27-alpine
 PACKAGE_NAME?=github.com/phoenixnap/k8s-cloud-provider-bmc
 GIT_VERSION?=$(shell git log -1 --format="%h")
 VERSION?=$(GIT_VERSION)
@@ -79,7 +79,7 @@ endif
 GOBIN ?= $(shell go env GOPATH)/bin
 LINTER ?= $(GOBIN)/golangci-lint
 
-.PHONY: fmt lint test tag version
+.PHONY: fmt lint helm-lint e2e test-live test tag version
 
 $(DIST_DIR):
 	mkdir -p $@
@@ -91,14 +91,23 @@ version: ## Report the version that would be put in the binary
 	@echo $(VERSION)
 
 fmt: golangci-lint  ## Format all source code files
-	@$(BUILD_CMD) $(LINTER) run --fix ./
+	@$(BUILD_CMD) $(LINTER) run --fix ./...
 
 golangci-lint: $(LINTER)
 $(LINTER):
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.44.2
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
 lint: golangci-lint ## Lint the files
-	@$(BUILD_CMD) $(LINTER) run ./
+	@$(BUILD_CMD) $(LINTER) run ./...
+
+helm-lint: ## Lint the Helm chart
+	helm lint --strict deploy/chart --set config.clientID=lint,config.clientSecret=lint
+
+e2e: ## Run the end-to-end test in a local kind cluster against a mock PhoenixNAP API
+	./test/e2e/run.sh
+
+test-live: ## Run the read-only live tests against the PhoenixNAP API; see phoenixnap/live_test.go for the billable ones
+	go test -tags live -run TestLiveReadOnly -v ./phoenixnap/
 
 test: ## Run unit tests
 	@$(BUILD_CMD) go test -short ./...

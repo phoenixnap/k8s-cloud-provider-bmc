@@ -2,7 +2,10 @@ package phoenixnap
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
@@ -267,4 +270,20 @@ func compareAddresses(a1, a2 []v1.NodeAddress) bool {
 		return true
 	}
 
+}
+
+// a transport error has no HTTP response; it must surface as an error, not a panic
+func TestServerByIDTransportError(t *testing.T) {
+	ts := httptest.NewServer(http.NotFoundHandler())
+	url := ts.URL
+	ts.Close()
+
+	bmc, _, _, _, _, err := constructClients(token, url)
+	if err != nil {
+		t.Fatalf("unable to construct clients: %v", err)
+	}
+	server, err := serverByID(context.TODO(), bmc, randomID)
+	if err == nil || errors.Is(err, cloudprovider.InstanceNotFound) {
+		t.Errorf("expected transport error, got server %v error %v", server, err)
+	}
 }

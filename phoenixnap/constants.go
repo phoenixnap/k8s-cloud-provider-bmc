@@ -10,11 +10,13 @@ const (
 	serviceNameTag              = "serviceName"
 	ccmIPDescription            = "PhoenixNAP Kubernetes CCM auto-generated for Load Balancer"
 	DefaultAnnotationIPLocation = "phoenixnap.com/ip-location"
-	serviceBlockCidr            = 29
-	gcIterationSeconds          = 30
-	serverCategory              = "SERVER"
-	publicNetworkCaps           = "PUBLIC_NETWORK"
-	publicNetwork               = "public network"
+	// kubeVipLoadBalancerIPsAnnotation is where kube-vip reads the IP for a Service of type=LoadBalancer
+	kubeVipLoadBalancerIPsAnnotation = "kube-vip.io/loadbalancerIPs"
+	serviceBlockCidr                 = 29
+	gcIterationSeconds               = 30
+	serverCategory                   = "SERVER"
+	publicNetworkCaps                = "PUBLIC_NETWORK"
+	publicNetwork                    = "public network"
 )
 
 var (
