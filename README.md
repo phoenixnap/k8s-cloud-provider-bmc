@@ -187,9 +187,11 @@ This section lists each configuration option, and whether it can be set by each 
 | Client Secret |    | `PNAP_CLIENT_SECRET` | `clientSecret` | error |
 | Location in which to create LoadBalancer IP Blocks |    | `PNAP_LOCATION` | `location` | Service-specific annotation, else error |
 | Base URL to PhoenixNAP API |    |    | `base-url` | Official PhoenixNAP API |
+| OAuth token URL for the PhoenixNAP API |    |    | `token-url` | Official PhoenixNAP auth endpoint |
 | Load balancer setting |   | `PNAP_LOAD_BALANCER` | `loadbalancer` | none |
 | Kubernetes Service annotation to set IP block location |   | `PNAP_ANNOTATION_IP_LOCATION` | `annotationIPLocation` | `"phoenixnap.com/ip-location"` |
 | Kubernetes API server port for IP |     | `PNAP_API_SERVER_PORT` | `apiServerPort` | Same as `kube-apiserver` on control plane nodes, same as `0` |
+| Label selector limiting which nodes receive LoadBalancer traffic |     | `PNAP_SERVICE_NODE_SELECTOR` | `serviceNodeSelector` | all nodes |
 
 **Location Note:** In all cases, where a "location" is required, use the 3-letter short-code of the location. For example,
 `"SEA"` or `"ASH"`.
@@ -232,7 +234,7 @@ When CCM encounters a `Service` of `type=LoadBalancer`, it will use the PhoenixN
 1. Look for a block of public IP addresses with the cluster and constant PhoenixNAP tags, as well as the tag `service=<serviceID>`. Else:
 2. Request a new, location-specific `/29` IP block and tag it appropriately.
 3. Use the first available IP in the block, i.e. the third, for the Service.
-4. Set the IP to `Service.Spec.LoadBalancerIP`.
+4. Set the IP to `Service.Spec.LoadBalancerIP` and the `kube-vip.io/loadbalancerIPs` annotation.
 5. Pass control to the specific load-balancer implementation.
 
 #### Service Load Balancer IP Location

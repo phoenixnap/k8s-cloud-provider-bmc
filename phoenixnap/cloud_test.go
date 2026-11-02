@@ -7,11 +7,11 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/phoenixnap/go-sdk-bmc/billingapi"
-	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
-	"github.com/phoenixnap/go-sdk-bmc/ipapi"
-	netapi "github.com/phoenixnap/go-sdk-bmc/networkapi"
-	"github.com/phoenixnap/go-sdk-bmc/tagapi"
+	"github.com/phoenixnap/go-sdk-bmc/billingapi/v4"
+	"github.com/phoenixnap/go-sdk-bmc/bmcapi/v3"
+	"github.com/phoenixnap/go-sdk-bmc/ipapi/v3"
+	netapi "github.com/phoenixnap/go-sdk-bmc/networkapi/v4"
+	"github.com/phoenixnap/go-sdk-bmc/tagapi/v3"
 	pnapServer "github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server"
 	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server/store"
 
@@ -34,16 +34,16 @@ const (
 type mockControllerClientBuilder struct {
 }
 
-func (m mockControllerClientBuilder) Config(name string) (*restclient.Config, error) {
+func (m mockControllerClientBuilder) Config(_ string) (*restclient.Config, error) {
 	return &restclient.Config{}, nil
 }
-func (m mockControllerClientBuilder) ConfigOrDie(name string) *restclient.Config {
+func (m mockControllerClientBuilder) ConfigOrDie(_ string) *restclient.Config {
 	return &restclient.Config{}
 }
-func (m mockControllerClientBuilder) Client(name string) (clientset.Interface, error) {
+func (m mockControllerClientBuilder) Client(_ string) (clientset.Interface, error) {
 	return k8sfake.NewSimpleClientset(), nil
 }
-func (m mockControllerClientBuilder) ClientOrDie(name string) clientset.Interface {
+func (m mockControllerClientBuilder) ClientOrDie(_ string) clientset.Interface {
 	return k8sfake.NewSimpleClientset()
 }
 
@@ -182,7 +182,7 @@ func TestHasClusterID(t *testing.T) {
 }
 
 // builds a phoenixnap client
-func constructClients(authToken, baseURL string) (bmc *bmcapi.APIClient, billing *billingapi.APIClient, ip *ipapi.APIClient, tag *tagapi.APIClient, netClient *netapi.APIClient, err error) {
+func constructClients(_, baseURL string) (bmc *bmcapi.APIClient, billing *billingapi.APIClient, ip *ipapi.APIClient, tag *tagapi.APIClient, netClient *netapi.APIClient, err error) {
 	// set up our client and create the cloud interface
 
 	var u *url.URL

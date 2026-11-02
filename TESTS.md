@@ -1,6 +1,40 @@
-# End-to-End Tests
+# Tests
 
-What end-to-end tests are required to test the CCM?
+## Automated tests
+
+| Command | What it covers | Needs |
+| --- | --- | --- |
+| `make test` | Unit tests, against an in-process fake of the PhoenixNAP API | Go |
+| `make lint` / `make helm-lint` | golangci-lint; `helm lint --strict` of the chart | golangci-lint, helm |
+| `make e2e` | Installs the Helm chart in a local [kind](https://kind.sigs.k8s.io) cluster whose kubelets run with `--cloud-provider=external`, against a mock PhoenixNAP API ([test/e2e/mockapi](test/e2e/mockapi/main.go)). Checks that nodes get a `phoenixnap://` provider ID, instance type and region labels, and lose the `uninitialized` taint; and that a `Service` of `type=LoadBalancer` gets an IP from a new block, which is assigned to the public network, then unassigned and deleted once the `Service` is deleted. `KEEP_CLUSTER=1` keeps the cluster afterwards. | docker, kind, kubectl, helm |
+| `make test-live` | Read-only checks against the production API through the CCM's own clients: authentication, scopes, and available server products with prices | `PNAP_CLIENT_ID`, `PNAP_CLIENT_SECRET` |
+
+`make test`, the linters and `make e2e` run in CI.
+
+### Live tests that create billable resources
+
+[phoenixnap/live_test.go](phoenixnap/live_test.go) also has tests that create, and then delete, real resources.
+They only run with the `live` build tag and their own opt-in env vars:
+
+```console
+# a public network and a /29 IP block, through the full LoadBalancer lifecycle
+PNAP_LIVE_LOCATION=... go test -tags live -run TestLiveLoadBalancer -v -timeout 30m ./phoenixnap/
+# InstancesV2 against an existing server, which is left untouched
+PNAP_LIVE_SERVER_ID=... go test -tags live -run TestLiveInstances -v ./phoenixnap/
+# or against a new hourly server, which is deleted at the end
+PNAP_LIVE_LOCATION=... PNAP_LIVE_SERVER_TYPE=... go test -tags live -run TestLiveInstances -v -timeout 90m ./phoenixnap/
+```
+
+Pick a product and location from the output of `make test-live`. Each test deletes what it created, and reports
+anything it could not delete in capitals. Afterwards, `go test -tags live -run TestLiveLeftovers -v ./phoenixnap/`
+checks the account independently for anything left behind. It also lists the CCM's tag names that no resource
+uses; with `PNAP_LIVE_REMOVE_UNUSED_CCM_TAGS=1` it deletes them. The load balancer test deletes the tag names it
+created itself.
+
+## Manual test plan (legacy)
+
+Parts of this plan were inherited from another provider and describe features this CCM does not have,
+such as BGP, metallb and a control plane FIP.
 
 Currently, these are performed manually, but executing each of the steps in each section of this document.
 

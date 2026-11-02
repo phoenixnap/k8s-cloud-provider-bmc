@@ -1,7 +1,7 @@
-# syntax=docker/dockerfile:1.1-experimental
+# syntax=docker/dockerfile:1
 
 # Build the manager binary
-ARG GOVER=1.19.1
+ARG GOVER=1.27.3
 FROM --platform=$BUILDPLATFORM golang:${GOVER} as builder
 
 ARG TARGETPLATFORM

@@ -26,11 +26,10 @@ func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	opts, err := options.NewCloudControllerManagerOptions()
-	opts.KubeCloudShared.CloudProvider.Name = phoenixnap.ProviderName
-
 	if err != nil {
 		klog.Fatalf("unable to initialize command options: %v", err)
 	}
+	opts.KubeCloudShared.CloudProvider.Name = phoenixnap.ProviderName
 	controllerInitializers := app.DefaultInitFuncConstructors
 	// remove unneeded controllers
 	delete(controllerInitializers, "route")

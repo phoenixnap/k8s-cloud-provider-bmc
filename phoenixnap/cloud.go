@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 
-	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
-	"github.com/phoenixnap/go-sdk-bmc/ipapi"
-	netapi "github.com/phoenixnap/go-sdk-bmc/networkapi"
-	"github.com/phoenixnap/go-sdk-bmc/tagapi"
+	"github.com/phoenixnap/go-sdk-bmc/bmcapi/v3"
+	"github.com/phoenixnap/go-sdk-bmc/ipapi/v3"
+	netapi "github.com/phoenixnap/go-sdk-bmc/networkapi/v4"
+	"github.com/phoenixnap/go-sdk-bmc/tagapi/v3"
 	"golang.org/x/oauth2/clientcredentials"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/component-base/version"
@@ -62,31 +63,54 @@ func init() {
 
 		// set up our client and create the cloud interface
 
+		// an API endpoint other than production usually has its own auth endpoint too
+		authURL := tokenURL
+		if pnapConfig.TokenURL != nil && *pnapConfig.TokenURL != "" {
+			authURL = *pnapConfig.TokenURL
+		}
 		ccConfig := clientcredentials.Config{
 			ClientID:     pnapConfig.ClientID,
 			ClientSecret: pnapConfig.ClientSecret,
-			TokenURL:     tokenURL,
+			TokenURL:     authURL,
 			Scopes:       []string{"bmc", "bmc.read", "tags", "tags.read"},
+		}
+		// one client, and so one cached token source, shared by all of the API clients
+		httpClient := ccConfig.Client(context.Background())
+		userAgent := fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
+
+		// optional override of the API endpoint; only scheme and host are replaced,
+		// each API keeps its own path
+		var host, scheme string
+		if pnapConfig.BaseURL != nil && *pnapConfig.BaseURL != "" {
+			u, err := url.Parse(*pnapConfig.BaseURL)
+			if err != nil || u.Host == "" {
+				return nil, fmt.Errorf("invalid base-url %q: must be of the form https://host[:port]", *pnapConfig.BaseURL)
+			}
+			host, scheme = u.Host, u.Scheme
 		}
 
 		bmcConfiguration := bmcapi.NewConfiguration()
-		bmcConfiguration.HTTPClient = ccConfig.Client(context.Background())
-		bmcConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
+		bmcConfiguration.HTTPClient = httpClient
+		bmcConfiguration.UserAgent = userAgent
+		bmcConfiguration.Host, bmcConfiguration.Scheme = host, scheme
 		bmcClient := bmcapi.NewAPIClient(bmcConfiguration)
 
 		ipConfiguration := ipapi.NewConfiguration()
-		ipConfiguration.HTTPClient = ccConfig.Client(context.Background())
-		ipConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
+		ipConfiguration.HTTPClient = httpClient
+		ipConfiguration.UserAgent = userAgent
+		ipConfiguration.Host, ipConfiguration.Scheme = host, scheme
 		ipClient := ipapi.NewAPIClient(ipConfiguration)
 
 		tagConfiguration := tagapi.NewConfiguration()
-		tagConfiguration.HTTPClient = ccConfig.Client(context.Background())
-		tagConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
+		tagConfiguration.HTTPClient = httpClient
+		tagConfiguration.UserAgent = userAgent
+		tagConfiguration.Host, tagConfiguration.Scheme = host, scheme
 		tagClient := tagapi.NewAPIClient(tagConfiguration)
 
 		netConfiguration := netapi.NewConfiguration()
-		netConfiguration.HTTPClient = ccConfig.Client(context.Background())
-		netConfiguration.UserAgent = fmt.Sprintf("cloud-provider-phoenixnap/%s", version.Get())
+		netConfiguration.HTTPClient = httpClient
+		netConfiguration.UserAgent = userAgent
+		netConfiguration.Host, netConfiguration.Scheme = host, scheme
 		netClient := netapi.NewAPIClient(netConfiguration)
 
 		cloud, err := newCloud(pnapConfig, bmcClient, ipClient, tagClient, netClient)
@@ -106,7 +130,7 @@ func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, 
 	clientset := clientBuilder.ClientOrDie("cloud-provider-phoenixnap-shared-informers")
 
 	// initialize the individual services
-	lb, err := newLoadBalancers(c.ipClient, c.tagClient, c.netClient, clientset, c.config.Location, c.config.LoadBalancerSetting, c.config.AnnotationIPLocation, c.config.ServiceNodeSelector)
+	lb, err := newLoadBalancers(c.ipClient, c.tagClient, c.netClient, clientset, c.config.Location, c.config.LoadBalancerSetting, c.config.AnnotationIPLocation, c.config.ServiceNodeSelector, stop)
 	if err != nil {
 		klog.Fatalf("could not initialize LoadBalancers: %v", err)
 	}
