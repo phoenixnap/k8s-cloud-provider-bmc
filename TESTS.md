@@ -6,8 +6,8 @@
 | --- | --- | --- |
 | `make test` | Unit tests, against an in-process fake of the PhoenixNAP API | Go |
 | `make lint` / `make helm-lint` | golangci-lint; `helm lint --strict` of the chart | golangci-lint, helm |
-| `make e2e` | Installs the Helm chart in a local [kind](https://kind.sigs.k8s.io) cluster whose kubelets run with `--cloud-provider=external`, against a mock PhoenixNAP API ([test/e2e/mockapi](test/e2e/mockapi/main.go)). Checks that nodes get a `phoenixnap://` provider ID, instance type and region labels, and lose the `uninitialized` taint; and that a `Service` of `type=LoadBalancer` gets an IP from a new block, which is assigned to the public network, then unassigned and deleted once the `Service` is deleted. `KEEP_CLUSTER=1` keeps the cluster afterwards. | docker, kind, kubectl, helm |
-| `make test-live` | Read-only checks against the production API through the CCM's own clients: authentication, scopes, and available server products with prices | `PNAP_CLIENT_ID`, `PNAP_CLIENT_SECRET` |
+| `make e2e` | Installs the Helm chart in a local [kind](https://kind.sigs.k8s.io) cluster against a mock PhoenixNAP API ([test/e2e/mockapi](test/e2e/mockapi/main.go)), and checks node initialization and the `type=LoadBalancer` lifecycle. `KEEP_CLUSTER=1` keeps the cluster afterwards. | docker, kind, kubectl, helm |
+| `make test-live` | Read-only checks of authentication and scopes against the production API, through the CCM's own clients | `PNAP_CLIENT_ID`, `PNAP_CLIENT_SECRET` |
 
 `make test`, the linters and `make e2e` run in CI.
 
@@ -25,11 +25,8 @@ PNAP_LIVE_SERVER_ID=... go test -tags live -run TestLiveInstances -v ./phoenixna
 PNAP_LIVE_LOCATION=... PNAP_LIVE_SERVER_TYPE=... go test -tags live -run TestLiveInstances -v -timeout 90m ./phoenixnap/
 ```
 
-Pick a product and location from the output of `make test-live`. Each test deletes what it created, and reports
-anything it could not delete in capitals. Afterwards, `go test -tags live -run TestLiveLeftovers -v ./phoenixnap/`
-checks the account independently for anything left behind. It also lists the CCM's tag names that no resource
-uses; with `PNAP_LIVE_REMOVE_UNUSED_CCM_TAGS=1` it deletes them. The load balancer test deletes the tag names it
-created itself.
+Each test deletes what it created, and reports anything it could not delete in capitals. Afterwards,
+`go test -tags live -run TestLiveLeftovers -v ./phoenixnap/` checks the account for anything left behind.
 
 ## Manual test plan (legacy)
 
