@@ -106,7 +106,7 @@ helm-lint: ## Lint the Helm chart
 e2e: ## Run the end-to-end test in a local kind cluster against a mock PhoenixNAP API
 	./test/e2e/run.sh
 
-test-live: ## Run the read-only live tests against the PhoenixNAP API; see phoenixnap/live_test.go for the billable ones
+test-live: ## Run the read-only live tests against the PhoenixNAP API; see TESTS.md for the billable ones
 	go test -tags live -run TestLiveReadOnly -v ./phoenixnap/
 
 test: ## Run unit tests

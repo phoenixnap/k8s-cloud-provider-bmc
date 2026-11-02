@@ -77,8 +77,6 @@ type mock struct {
 	tags    map[string]bool
 	blocks  map[string]*ipBlock
 	nextID  int
-	// requests is a log of "METHOD path" for every API call, for assertions
-	requests []string
 }
 
 func main() {
@@ -119,7 +117,6 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer m.mu.Unlock()
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	if path != "/state" {
-		m.requests = append(m.requests, r.Method+" "+path)
 		log.Printf("%s %s?%s", r.Method, path, r.URL.RawQuery)
 	}
 
@@ -131,7 +128,7 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, b := range m.blocks {
 			blocks = append(blocks, b)
 		}
-		writeJSON(w, map[string]any{"blocks": blocks, "requests": m.requests})
+		writeJSON(w, map[string]any{"blocks": blocks})
 
 	case path == serverPrefix && r.Method == http.MethodGet:
 		writeJSON(w, m.servers)

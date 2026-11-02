@@ -3,12 +3,7 @@
 // Live tests against the production PhoenixNAP API. They are excluded from normal
 // test runs by the "live" build tag, and the ones that create billable resources
 // need explicit opt-in env vars. Credentials come from PNAP_CLIENT_ID and
-// PNAP_CLIENT_SECRET, as for the CCM itself.
-//
-//	go test -tags live -run TestLiveReadOnly -v ./phoenixnap/
-//	PNAP_LIVE_LOCATION=PHX go test -tags live -run TestLiveLoadBalancer -v -timeout 30m ./phoenixnap/
-//	PNAP_LIVE_LOCATION=PHX PNAP_LIVE_SERVER_TYPE=s0.d1.small go test -tags live -run TestLiveInstances -v -timeout 90m ./phoenixnap/
-//	PNAP_LIVE_SERVER_ID=<existing id> go test -tags live -run TestLiveInstances -v ./phoenixnap/
+// PNAP_CLIENT_SECRET, as for the CCM itself. See TESTS.md for how to run them.
 package phoenixnap
 
 import (
@@ -17,13 +12,11 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/phoenixnap/go-sdk-bmc/billingapi/v4"
 	"github.com/phoenixnap/go-sdk-bmc/bmcapi/v3"
 	netapi "github.com/phoenixnap/go-sdk-bmc/networkapi/v4"
 	"golang.org/x/oauth2/clientcredentials"
@@ -68,8 +61,7 @@ func liveRequire(t *testing.T, names ...string) {
 	}
 }
 
-// TestLiveReadOnly checks authentication and scopes through the provider's own clients,
-// and reports which server products are available and what they cost. It creates nothing.
+// TestLiveReadOnly checks authentication and scopes through the provider's own clients. It creates nothing.
 func TestLiveReadOnly(t *testing.T) {
 	c := liveCloud(t)
 	ctx := context.Background()
@@ -101,88 +93,6 @@ func TestLiveReadOnly(t *testing.T) {
 		t.Logf("provider network client OK: %d public networks in account", len(networks))
 	}
 
-	// what can be provisioned right now, cheapest hourly first
-	billingConfig := billingapi.NewConfiguration()
-	billingConfig.HTTPClient = liveHTTPClient()
-	billing := billingapi.NewAPIClient(billingConfig)
-	availability, _, err := billing.ProductAvailabilityAPI.ProductAvailabilityGet(ctx).ProductCategory([]string{serverCategory}).ShowOnlyMinQuantityAvailable(true).Execute()
-	if err != nil {
-		t.Fatalf("unable to get product availability: %v", err)
-	}
-	available := map[string]float32{}
-	for _, p := range availability {
-		for _, l := range p.LocationAvailabilityDetails {
-			if l.MinQuantityAvailable && l.AvailableQuantity > 0 {
-				available[p.ProductCode+"/"+string(l.Location)] = l.AvailableQuantity
-			}
-		}
-	}
-	type offer struct {
-		code, location string
-		price, net     float32
-		quantity       float32
-	}
-	var offers []offer
-	for _, p := range liveProducts(t, billing, serverCategory) {
-		for _, plan := range p.Plans {
-			if q, ok := available[p.ProductCode+"/"+plan.Location]; ok && plan.PricingModel == "HOURLY" {
-				offers = append(offers, offer{p.ProductCode, plan.Location, plan.Price, netPrice(plan), q})
-			}
-		}
-	}
-	sort.Slice(offers, func(i, j int) bool {
-		return offers[i].net < offers[j].net || (offers[i].net == offers[j].net && offers[i].price < offers[j].price)
-	})
-	t.Logf("%d available hourly server offers, cheapest first (list price, price after this account's discounts):", len(offers))
-	for i, o := range offers {
-		if i == 15 {
-			break
-		}
-		t.Logf("  %-16s %s  $%.2f/hour, $%.2f/hour after discounts  (%v available)", o.code, o.location, o.price, o.net, o.quantity)
-	}
-
-	// the load balancer creates one block of this size per Service
-	blockProduct := fmt.Sprintf("range-%d", serviceBlockCidr)
-	for _, p := range liveProducts(t, billing, "PUBLIC_IP") {
-		if p.ProductCode != blockProduct {
-			continue
-		}
-		for _, plan := range p.Plans {
-			t.Logf("/%d IP block (%s) %s %s: $%.2f per %s, $%.2f after discounts", serviceBlockCidr, p.ProductCode, plan.Location, plan.PricingModel, plan.Price, plan.PriceUnit, netPrice(plan))
-		}
-	}
-}
-
-// netPrice is the price after this account's discounts
-func netPrice(plan billingapi.PricingPlan) float32 {
-	if d := plan.ApplicableDiscounts; d != nil && d.DiscountedPrice != nil {
-		return *d.DiscountedPrice
-	}
-	return plan.Price
-}
-
-type liveProduct struct {
-	ProductCode string
-	Plans       []billingapi.PricingPlan
-}
-
-// liveProducts returns the products of a category, whichever of the SDK's product types each one decodes to
-func liveProducts(t *testing.T, billing *billingapi.APIClient, category string) []liveProduct {
-	t.Helper()
-	products, _, err := billing.ProductsAPI.ProductsGet(context.Background()).ProductCategory(category).Execute()
-	if err != nil {
-		t.Fatalf("unable to get %s products: %v", category, err)
-	}
-	var ret []liveProduct
-	for _, p := range products {
-		switch {
-		case p.ServerProduct != nil:
-			ret = append(ret, liveProduct{p.ServerProduct.ProductCode, p.ServerProduct.Plans})
-		case p.Product != nil:
-			ret = append(ret, liveProduct{p.Product.ProductCode, p.Product.Plans})
-		}
-	}
-	return ret
 }
 
 // TestLiveInstances checks InstancesV2 against a real server: an existing one from
@@ -298,9 +208,6 @@ func TestLiveLoadBalancer(t *testing.T) {
 	ctx := context.Background()
 	location := os.Getenv("PNAP_LIVE_LOCATION")
 
-	// the CCM creates the tag names it needs; remember which already existed, to remove only the new ones
-	existingTags := liveTagNames(t, c)
-
 	network, _, err := c.netClient.PublicNetworksAPI.PublicNetworksPost(ctx).PublicNetworkCreate(*netapi.NewPublicNetworkCreate("ccm-live-"+uuid.New().String()[:8], location)).Execute()
 	if err != nil {
 		t.Fatalf("unable to create public network in %s: %v", location, err)
@@ -318,7 +225,6 @@ func TestLiveLoadBalancer(t *testing.T) {
 	t.Cleanup(func() {
 		close(stop)
 		liveCleanupBlocks(t, l)
-		liveCleanupTags(t, c, existingTags)
 		if _, err := c.netClient.PublicNetworksAPI.PublicNetworksNetworkIdDelete(context.Background(), network.Id).Execute(); err != nil {
 			t.Errorf("UNABLE TO DELETE PUBLIC NETWORK %s, delete it manually: %v", network.Id, err)
 		} else {
@@ -353,7 +259,7 @@ func TestLiveLoadBalancer(t *testing.T) {
 	if block.AssignedResourceId == nil || *block.AssignedResourceId != network.Id {
 		t.Errorf("block %s is not assigned to network %s: %+v", block.GetId(), network.Id, block)
 	}
-	t.Logf("block %s %s status %s assigned to %v", block.GetId(), block.GetCidr(), block.GetStatus(), deref(block.AssignedResourceId))
+	t.Logf("block %s %s status %s assigned to %s", block.GetId(), block.GetCidr(), block.GetStatus(), block.GetAssignedResourceId())
 
 	// idempotent: a second Ensure returns the same IP and creates nothing
 	updated, _ := k8sclient.CoreV1().Services("default").Get(ctx, "ccm-live", metav1.GetOptions{})
@@ -382,73 +288,6 @@ func TestLiveLoadBalancer(t *testing.T) {
 	t.Errorf("block %s was not deleted by the reaper within 15 minutes", block.GetId())
 }
 
-func liveTagNames(t *testing.T, c *cloud) map[string]bool {
-	t.Helper()
-	tags, _, err := c.tagClient.TagsAPI.TagsGet(context.Background()).Execute()
-	if err != nil {
-		t.Fatalf("unable to list tags: %v", err)
-	}
-	names := map[string]bool{}
-	for _, tag := range tags {
-		names[tag.Name] = true
-	}
-	return names
-}
-
-// ccmTagNames are the tag names the CCM creates for its IP blocks
-func ccmTagNames() []string {
-	clsTag, _ := clusterTag("")
-	return []string{pnapTag, clsTag, serviceNamespaceTag, serviceNameTag, deleteTag}
-}
-
-// liveCleanupTags deletes the CCM's tag names that did not exist before the test, if nothing uses them
-func liveCleanupTags(t *testing.T, c *cloud, existing map[string]bool) {
-	ctx := context.Background()
-	tags, _, err := c.tagClient.TagsAPI.TagsGet(ctx).Execute()
-	if err != nil {
-		t.Errorf("unable to list tags for cleanup: %v", err)
-		return
-	}
-	for _, tag := range tags {
-		if existing[tag.Name] || !contains(ccmTagNames(), tag.Name) {
-			continue
-		}
-		if len(tag.ResourceAssignments) > 0 {
-			t.Logf("keeping tag %s, still assigned to %d resources", tag.Name, len(tag.ResourceAssignments))
-			continue
-		}
-		if err := liveRetry(func() error {
-			_, _, err := c.tagClient.TagsAPI.TagsTagIdDelete(ctx, tag.Id).Execute()
-			return err
-		}); err != nil {
-			t.Errorf("UNABLE TO DELETE TAG %s (%s), delete it manually: %v", tag.Name, tag.Id, err)
-		} else {
-			t.Logf("deleted tag %s created by this test", tag.Name)
-		}
-	}
-}
-
-// liveRetry retries a cleanup call, as the API returns occasional transient errors such as 503
-func liveRetry(f func() error) error {
-	var err error
-	for i := 0; i < 5; i++ {
-		if err = f(); err == nil {
-			return nil
-		}
-		time.Sleep(time.Duration(i+1) * 5 * time.Second)
-	}
-	return err
-}
-
-func contains(list []string, s string) bool {
-	for _, l := range list {
-		if l == s {
-			return true
-		}
-	}
-	return false
-}
-
 // liveCleanupBlocks removes every block of this run's cluster, whatever state the test left it in
 func liveCleanupBlocks(t *testing.T, l *loadBalancers) {
 	ctx := context.Background()
@@ -468,13 +307,6 @@ func liveCleanupBlocks(t *testing.T, l *loadBalancers) {
 		time.Sleep(20 * time.Second)
 	}
 	t.Errorf("UNABLE TO CLEAN UP IP BLOCKS for cluster %s, delete blocks tagged with it manually", l.clusterID)
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return "<nil>"
-	}
-	return *s
 }
 
 // TestLiveLeftovers fails if the account holds anything the live tests or the CCM created:
@@ -509,29 +341,5 @@ func TestLiveLeftovers(t *testing.T) {
 	for _, b := range blocks {
 		t.Errorf("leftover CCM IP block %s %s, status %s", b.GetId(), b.GetCidr(), b.GetStatus())
 	}
-	// unused CCM tag names are not an error, as a CCM legitimately creates them, but are worth knowing
-	// about; PNAP_LIVE_REMOVE_UNUSED_CCM_TAGS=1 deletes them, e.g. after an interrupted live run
-	remove := os.Getenv("PNAP_LIVE_REMOVE_UNUSED_CCM_TAGS") == "1"
-	tags, _, err := c.tagClient.TagsAPI.TagsGet(ctx).Execute()
-	if err != nil {
-		t.Fatalf("unable to list tags: %v", err)
-	}
-	for _, tag := range tags {
-		if !contains(ccmTagNames(), tag.Name) || len(tag.ResourceAssignments) > 0 {
-			continue
-		}
-		if !remove {
-			t.Logf("unused CCM tag name %s (%s)", tag.Name, tag.Id)
-			continue
-		}
-		if err := liveRetry(func() error {
-			_, _, err := c.tagClient.TagsAPI.TagsTagIdDelete(ctx, tag.Id).Execute()
-			return err
-		}); err != nil {
-			t.Errorf("unable to delete unused CCM tag %s (%s): %v", tag.Name, tag.Id, err)
-		} else {
-			t.Logf("deleted unused CCM tag %s (%s)", tag.Name, tag.Id)
-		}
-	}
-	t.Logf("checked %d servers, %d public networks, %d CCM-tagged IP blocks, %d tags", len(servers), len(networks), len(blocks), len(tags))
+	t.Logf("checked %d servers, %d public networks, %d CCM-tagged IP blocks", len(servers), len(networks), len(blocks))
 }
