@@ -1,16 +1,13 @@
 module github.com/phoenixnap/k8s-cloud-provider-bmc
 
-go 1.19
+go 1.23.0
 
 require (
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/gorilla/mux v1.8.0
 	github.com/pallinder/go-randomdata v1.2.0
-	github.com/phoenixnap/go-sdk-bmc/billingapi v1.3.0
-	github.com/phoenixnap/go-sdk-bmc/bmcapi v1.2.2
-	github.com/phoenixnap/go-sdk-bmc/ipapi v1.1.2
 	github.com/spf13/pflag v1.0.5
-	golang.org/x/oauth2 v0.6.0
+	golang.org/x/oauth2 v0.27.0
 	k8s.io/api v0.23.6
 	k8s.io/apimachinery v0.23.6
 	k8s.io/client-go v0.23.6
@@ -19,10 +16,16 @@ require (
 	k8s.io/klog/v2 v2.30.0
 )
 
-require github.com/phoenixnap/go-sdk-bmc/networkapi v1.1.3
+require (
+	github.com/phoenixnap/go-sdk-bmc/billingapi/v4 v4.0.1
+	github.com/phoenixnap/go-sdk-bmc/bmcapi/v3 v3.5.0
+	github.com/phoenixnap/go-sdk-bmc/ipapi/v3 v3.2.1
+	github.com/phoenixnap/go-sdk-bmc/networkapi/v4 v4.1.1
+	github.com/phoenixnap/go-sdk-bmc/tagapi/v3 v3.0.7
+)
 
 require (
-	cloud.google.com/go/compute/metadata v0.2.1 // indirect
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/NYTimes/gziphandler v1.1.1 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
@@ -60,7 +63,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/phoenixnap/go-sdk-bmc/tagapi v1.1.3
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.11.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
@@ -68,7 +70,6 @@ require (
 	github.com/prometheus/procfs v0.6.0 // indirect
 	github.com/spf13/afero v1.9.3 // indirect
 	github.com/spf13/cobra v1.2.1 // indirect
-	github.com/stretchr/testify v1.8.1 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.5 // indirect
@@ -95,7 +96,6 @@ require (
 	golang.org/x/text v0.8.0 // indirect
 	golang.org/x/time v0.0.0-20220609170525-579cf78fd858 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
-	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20221024183307-1bc688fe9f3e // indirect
 	google.golang.org/grpc v1.50.1 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect

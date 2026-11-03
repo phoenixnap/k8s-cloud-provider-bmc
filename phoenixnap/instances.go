@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/netip"
 	"strings"
 
-	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
+	"github.com/phoenixnap/go-sdk-bmc/bmcapi/v3"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -29,7 +31,7 @@ func newInstances(client *bmcapi.APIClient) *instances {
 // InstanceShutdown returns true if the node is shutdown in cloudprovider
 func (i *instances) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, error) {
 	klog.V(2).Infof("called InstanceShutdown for node %s with providerID %s", node.GetName(), node.Spec.ProviderID)
-	server, err := i.serverFromProviderID(node.Spec.ProviderID)
+	server, err := i.serverFromProviderID(ctx, node.Spec.ProviderID)
 	if err != nil {
 		return false, err
 	}
@@ -40,7 +42,7 @@ func (i *instances) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, 
 // InstanceExists returns true if the node exists in cloudprovider
 func (i *instances) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
 	klog.V(2).Infof("called InstanceExists for node %s with providerID %s", node.GetName(), node.Spec.ProviderID)
-	_, err := i.serverFromProviderID(node.Spec.ProviderID)
+	_, err := i.serverFromProviderID(ctx, node.Spec.ProviderID)
 
 	switch {
 	case errors.Is(err, cloudprovider.InstanceNotFound):
@@ -54,7 +56,7 @@ func (i *instances) InstanceExists(ctx context.Context, node *v1.Node) (bool, er
 
 // InstanceMetadata returns instancemetadata for the node according to the cloudprovider
 func (i *instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
-	server, err := i.serverByNode(node)
+	server, err := i.serverByNode(ctx, node)
 	if err != nil {
 		return nil, err
 	}
@@ -81,55 +83,74 @@ func nodeAddresses(server bmcapi.Server) ([]v1.NodeAddress, error) {
 	var addresses []v1.NodeAddress
 	addresses = append(addresses, v1.NodeAddress{Type: v1.NodeHostName, Address: server.Hostname})
 
-	var privateIP, publicIP bool
+	// public IPs are optional: servers can be provisioned on private networks only
 	for _, address := range server.PublicIpAddresses {
-		addresses = append(addresses, v1.NodeAddress{Type: v1.NodeExternalIP, Address: address})
-		publicIP = true
+		if ip, ok := serverAddress(server.Id, address); ok {
+			addresses = append(addresses, v1.NodeAddress{Type: v1.NodeExternalIP, Address: ip})
+		}
 	}
+	var privateIP bool
 	for _, address := range server.PrivateIpAddresses {
-		addresses = append(addresses, v1.NodeAddress{Type: v1.NodeInternalIP, Address: address})
-		privateIP = true
+		if ip, ok := serverAddress(server.Id, address); ok {
+			addresses = append(addresses, v1.NodeAddress{Type: v1.NodeInternalIP, Address: ip})
+			privateIP = true
+		}
 	}
 
 	if !privateIP {
 		return nil, errors.New("could not get at least one private ip")
 	}
 
-	if !publicIP {
-		return nil, errors.New("could not get at least one public ip")
-	}
-
 	return addresses, nil
 }
 
-func (i *instances) serverByNode(node *v1.Node) (*bmcapi.Server, error) {
-	if node.Spec.ProviderID != "" {
-		return i.serverFromProviderID(node.Spec.ProviderID)
+// serverAddress returns the IP for an address as the API reports it. The API reports
+// IP blocks assigned to a server as a range, "first - last", for which the first address is used.
+func serverAddress(serverID, address string) (string, bool) {
+	first, last, isRange := strings.Cut(address, " - ")
+	ip, err := netip.ParseAddr(strings.TrimSpace(first))
+	if err == nil && isRange {
+		_, err = netip.ParseAddr(strings.TrimSpace(last))
 	}
-
-	return serverByName(i.bmcClient, types.NodeName(node.GetName()))
+	if err != nil {
+		klog.V(2).Infof("server %s: skipping address %q that is neither an IP nor an IP range", serverID, address)
+		return "", false
+	}
+	return ip.String(), true
 }
 
-func serverByID(client *bmcapi.APIClient, id string) (*bmcapi.Server, error) {
-	klog.V(2).Infof("called serverByID with ID %s", id)
-	server, resp, err := client.ServersApi.ServersServerIdGet(context.Background(), id).Execute()
+func (i *instances) serverByNode(ctx context.Context, node *v1.Node) (*bmcapi.Server, error) {
+	if node.Spec.ProviderID != "" {
+		return i.serverFromProviderID(ctx, node.Spec.ProviderID)
+	}
 
-	if resp.StatusCode == 404 || resp.StatusCode == 403 {
+	return serverByName(ctx, i.bmcClient, types.NodeName(node.GetName()))
+}
+
+func serverByID(ctx context.Context, client *bmcapi.APIClient, id string) (*bmcapi.Server, error) {
+	klog.V(2).Infof("called serverByID with ID %s", id)
+	server, resp, err := client.ServersAPI.ServersServerIdGet(ctx, id).Execute()
+
+	// resp is nil on transport errors, so check it before reading the status code
+	if resp != nil && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden) {
 		return nil, cloudprovider.InstanceNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return server, err
+	if server == nil {
+		return nil, cloudprovider.InstanceNotFound
+	}
+	return server, nil
 }
 
 // serverByName returns an instance whose hostname matches the kubernetes node.Name
-func serverByName(client *bmcapi.APIClient, nodeName types.NodeName) (*bmcapi.Server, error) {
+func serverByName(ctx context.Context, client *bmcapi.APIClient, nodeName types.NodeName) (*bmcapi.Server, error) {
 	klog.V(2).Infof("called serverByName nodeName %s", nodeName)
 	if string(nodeName) == "" {
 		return nil, errors.New("node name cannot be empty string")
 	}
-	servers, _, err := client.ServersApi.ServersGet(context.Background()).Execute()
+	servers, _, err := client.ServersAPI.ServersGet(ctx).Execute()
 
 	if err != nil {
 		klog.V(2).Infof("error listing servers: %v", err)
@@ -175,14 +196,14 @@ func serverIDFromProviderID(providerID string) (string, error) {
 }
 
 // serverFromProviderID uses providerID to get the server id and return the server
-func (i *instances) serverFromProviderID(providerID string) (*bmcapi.Server, error) {
+func (i *instances) serverFromProviderID(ctx context.Context, providerID string) (*bmcapi.Server, error) {
 	klog.V(2).Infof("called serverFromProviderID with providerID %s", providerID)
 	id, err := serverIDFromProviderID(providerID)
 	if err != nil {
 		return nil, err
 	}
 
-	return serverByID(i.bmcClient, id)
+	return serverByID(ctx, i.bmcClient, id)
 }
 
 // providerIDFromServer returns a providerID from a server

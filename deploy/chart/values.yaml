@@ -22,6 +22,10 @@ image:
 # -- Annotations to be added to pods.
 podAnnotations: {}
 
+# -- [Priority class](https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/) for the pod.
+# The CCM must run for nodes to become schedulable, so it defaults to the highest cluster-wide priority.
+priorityClassName: system-cluster-critical
+
 # -- Reference to one or more secrets to be used when [pulling images](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-pod-that-uses-your-secret) (from private registries).
 imagePullSecrets: []
 
@@ -124,5 +128,8 @@ config:
   clientSecret: ""
   # location: location
   # base-url: ""
+  # token-url: ""
   # loadbalancer: ""
   # apiServerPort: 6443
+  # annotationIPLocation: phoenixnap.com/ip-location
+  # serviceNodeSelector: ""

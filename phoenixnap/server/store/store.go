@@ -1,8 +1,8 @@
 package store
 
 import (
-	"github.com/phoenixnap/go-sdk-bmc/billingapi"
-	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
+	"github.com/phoenixnap/go-sdk-bmc/billingapi/v4"
+	"github.com/phoenixnap/go-sdk-bmc/bmcapi/v3"
 )
 
 // DataStore is the item that retrieves backend information to serve out

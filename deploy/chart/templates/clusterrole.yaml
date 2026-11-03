@@ -4,9 +4,9 @@ kind: ClusterRole
 metadata:
   labels:
     {{- include "cloud-provider-phoenixnap.labels" . | nindent 4 }}
-  {{- with .Values.clusterRole.annotations }}
   annotations:
     rbac.authorization.kubernetes.io/autoupdate: 'true'
+  {{- with .Values.clusterRole.annotations }}
     {{- toYaml . | nindent 4 }}
   {{- end }}
   name: '{{ .Values.clusterRole.name }}'

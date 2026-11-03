@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/phoenixnap/go-sdk-bmc/billingapi"
-	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
+	"github.com/phoenixnap/go-sdk-bmc/billingapi/v4"
+	"github.com/phoenixnap/go-sdk-bmc/bmcapi/v3"
 	"github.com/phoenixnap/k8s-cloud-provider-bmc/phoenixnap/server/store"
 )
 
@@ -50,7 +50,7 @@ func (c *Server) CreateHandler() http.Handler {
 }
 
 // list all locations
-func (c *Server) listLocationsHandler(w http.ResponseWriter, r *http.Request) {
+func (c *Server) listLocationsHandler(w http.ResponseWriter, _ *http.Request) {
 	locations, err := c.Store.ListLocations()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -58,9 +58,9 @@ func (c *Server) listLocationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var resp = struct {
-		locations []string
+		Locations []string `json:"locations"`
 	}{
-		locations: locations,
+		Locations: locations,
 	}
 	if err := writeJSON(w, &resp); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -70,7 +70,7 @@ func (c *Server) listLocationsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // list all plans
-func (c *Server) listProductsHandler(w http.ResponseWriter, r *http.Request) {
+func (c *Server) listProductsHandler(w http.ResponseWriter, _ *http.Request) {
 	products, err := c.Store.ListProducts()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -78,9 +78,9 @@ func (c *Server) listProductsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var resp = struct {
-		products []*billingapi.Product
+		Products []*billingapi.Product `json:"products"`
 	}{
-		products: products,
+		Products: products,
 	}
 	if err := writeJSON(w, &resp); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -90,7 +90,7 @@ func (c *Server) listProductsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // list all servers
-func (c *Server) listServersHandler(w http.ResponseWriter, r *http.Request) {
+func (c *Server) listServersHandler(w http.ResponseWriter, _ *http.Request) {
 	servers, err := c.Store.ListServers()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -177,8 +177,12 @@ func (c *Server) updateServerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if server != nil {
-		server.Hostname = *req.Hostname
-		server.Description = req.Description
+		if req.Hostname != nil {
+			server.Hostname = *req.Hostname
+		}
+		if req.Description != nil {
+			server.Description = req.Description
+		}
 		server.Id = serverID
 		if err := c.Store.UpdateServer(server); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

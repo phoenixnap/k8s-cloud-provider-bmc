@@ -11,18 +11,18 @@ import (
 type LB struct {
 }
 
-func NewLB(k8sclient kubernetes.Interface, config string) *LB {
+func NewLB(_ kubernetes.Interface, _ string) *LB {
 	return &LB{}
 }
 
-func (l *LB) AddService(ctx context.Context, svcNamespace, svcName, ip string, nodes []loadbalancers.Node) error {
+func (l *LB) AddService(_ context.Context, _, _, _ string, _ []loadbalancers.Node) error {
 	return nil
 }
 
-func (l *LB) RemoveService(ctx context.Context, svcNamespace, svcName, ip string) error {
+func (l *LB) RemoveService(_ context.Context, _, _, _ string) error {
 	return nil
 }
 
-func (l *LB) UpdateService(ctx context.Context, svcNamespace, svcName string, nodes []loadbalancers.Node) error {
+func (l *LB) UpdateService(_ context.Context, _, _ string, _ []loadbalancers.Node) error {
 	return nil
 }

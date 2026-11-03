@@ -10,8 +10,8 @@ import (
 	"github.com/apparentlymart/go-cidr/cidr"
 	"github.com/google/uuid"
 	"github.com/pallinder/go-randomdata"
-	"github.com/phoenixnap/go-sdk-bmc/billingapi"
-	"github.com/phoenixnap/go-sdk-bmc/bmcapi"
+	"github.com/phoenixnap/go-sdk-bmc/billingapi/v4"
+	"github.com/phoenixnap/go-sdk-bmc/bmcapi/v3"
 )
 
 const (

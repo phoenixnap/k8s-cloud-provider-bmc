@@ -68,7 +68,7 @@ Create the name of the secret containing the config file to use
 {{- if .Values.configSecret.create }}
 {{- default (include "cloud-provider-phoenixnap.fullname" .) .Values.configSecret.name }}
 {{- else }}
-{{- default "default" .Values.configSecret.name }}
+{{- required "configSecret.name must be set when configSecret.create is false" .Values.configSecret.name }}
 {{- end }}
 {{- end }}
 
@@ -76,9 +76,5 @@ Create the name of the secret containing the config file to use
 Create the image version tag
 */}}
 {{- define "cloud-provider-phoenixnap.imageTag" -}}
-{{- if eq .Chart.AppVersion "main" }}
-{{- default "main" .Values.image.tag }}
-{{- else }}
-{{- default .Values.image.tag }}
-{{- end }}
+{{- default .Chart.AppVersion .Values.image.tag }}
 {{- end }}

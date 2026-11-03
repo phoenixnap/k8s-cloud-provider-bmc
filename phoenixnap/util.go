@@ -1,6 +1,6 @@
 package phoenixnap
 
-import "github.com/phoenixnap/go-sdk-bmc/ipapi"
+import "github.com/phoenixnap/go-sdk-bmc/ipapi/v3"
 
 // utility methods
 func tagAssignmentsIntoRequests(tags []ipapi.TagAssignment) []ipapi.TagAssignmentRequest {
