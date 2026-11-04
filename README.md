@@ -20,7 +20,8 @@ Please read through the requirements carefully as they are critical to running t
 
 Recommended versions of PhoenixNAP CCM based on your Kubernetes version:
 
-* PhoenixNAP CCM version v1.0.0+ supports Kubernetes version >=1.20.0
+* PhoenixNAP CCM v1.1.0 is built with the Kubernetes 1.26 libraries and tested on Kubernetes 1.30
+* PhoenixNAP CCM v1.0.0 supports Kubernetes version >=1.20.0
 
 ### Load Balancer
 
@@ -146,7 +147,7 @@ pnap-cloud-config   Opaque                                1         2m
 To apply the CCM itself, select your release and apply the manifest:
 
 ```
-RELEASE=v2.0.0
+RELEASE=v1.1.0
 kubectl apply -f https://github.com/phoenixnap/k8s-cloud-provider-bmc/releases/download/${RELEASE}/deployment.yaml
 ```
 
